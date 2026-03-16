@@ -48,6 +48,8 @@ export default function FlashWizard() {
   const [selectedRelease, setSelectedRelease] = useState<FirmwareRelease | null>(null);
   const [segmentFiles, setSegmentFiles] = useState<SegmentFile[]>([]);
   const [flashOptions, setFlashOptions] = useState<FlashOptions>(DEFAULT_FLASH_OPTIONS);
+  const [autoBootMode, setAutoBootMode] = useState(true);
+  const [bootAttempting, setBootAttempting] = useState(false);
   const serial = useSerial();
   const flash = useFlash();
   const firmware = useFirmware();
@@ -61,12 +63,60 @@ export default function FlashWizard() {
       await manager.requestPort();
       const port = manager.getPort();
       if (!port) throw new Error("No port selected");
-      await flash.connect(port);
+      await flash.connect(port, autoBootMode);
       setStep("firmware");
     } catch (err) {
       console.error("Connection failed:", err);
     }
-  }, [flash]);
+  }, [flash, autoBootMode]);
+
+  // Manual boot mode entry on already-connected port
+  const handleManualBoot = useCallback(async () => {
+    try {
+      setBootAttempting(true);
+      const manager = SerialManager.getInstance();
+      let port = manager.getPort();
+      if (!port) {
+        await manager.requestPort();
+        port = manager.getPort();
+      }
+      if (!port) throw new Error("No port selected");
+
+      // Open port temporarily if not open
+      const wasOpen = port.readable !== null;
+      if (!wasOpen) {
+        await port.open({ baudRate: 115200 });
+      }
+
+      // Classic DTR/RTS sequence
+      await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+      await new Promise((r) => setTimeout(r, 100));
+      await port.setSignals({ dataTerminalReady: true, requestToSend: false });
+      await new Promise((r) => setTimeout(r, 50));
+      await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+      await new Promise((r) => setTimeout(r, 100));
+
+      // USB CDC/JTAG sequence for native USB (C3/C6/S2/S3)
+      await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+      await new Promise((r) => setTimeout(r, 100));
+      await port.setSignals({ dataTerminalReady: true, requestToSend: true });
+      await new Promise((r) => setTimeout(r, 100));
+      await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+      await new Promise((r) => setTimeout(r, 100));
+      await port.setSignals({ dataTerminalReady: true, requestToSend: false });
+      await new Promise((r) => setTimeout(r, 100));
+      await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+
+      if (!wasOpen) {
+        await port.close();
+      }
+
+      setBootAttempting(false);
+    } catch (err) {
+      setBootAttempting(false);
+      console.error("Boot mode entry failed:", err);
+    }
+  }, []);
 
   // Step 2: Select + download firmware binary from a release
   const handleSelectFirmware = useCallback(
@@ -232,7 +282,8 @@ export default function FlashWizard() {
             <h2 className="text-lg font-semibold text-white">Connect Device</h2>
             <p className="text-sm text-gray-400">
               Connect your ESP32 device via USB. Make sure you have the correct USB
-              driver installed (CP2102, CH340, or FTDI).
+              driver installed (CP2102, CH340, or FTDI). For boards with native USB
+              (ESP32-C3, C6, S2, S3), the built-in USB Serial/JTAG is used.
             </p>
 
             {flash.isConnected && flash.chipInfo ? (
@@ -253,25 +304,88 @@ export default function FlashWizard() {
               </div>
             ) : (
               <div className="space-y-3">
-                <button
-                  onClick={handleConnect}
-                  disabled={serial.state === "connecting"}
-                  className="rounded-lg bg-blue-600 px-6 py-3 font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-800 disabled:text-blue-400"
-                >
-                  {serial.state === "connecting" ? "Connecting..." : "Select USB Port"}
-                </button>
+                {/* Auto boot mode toggle */}
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={autoBootMode}
+                    onChange={(e) => setAutoBootMode(e.target.checked)}
+                    className="rounded border-gray-600 bg-gray-800 text-blue-600"
+                  />
+                  Auto-enter boot mode on connect (recommended)
+                </label>
 
-                {/* Boot mode instructions */}
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={handleConnect}
+                    disabled={serial.state === "connecting"}
+                    className="rounded-lg bg-blue-600 px-6 py-3 font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-800 disabled:text-blue-400"
+                  >
+                    {serial.state === "connecting" ? "Connecting..." : "Select USB Port"}
+                  </button>
+
+                  <button
+                    onClick={handleManualBoot}
+                    disabled={bootAttempting}
+                    className="rounded-lg border border-yellow-600 bg-yellow-900/30 px-4 py-3 font-medium text-yellow-300 transition-colors hover:bg-yellow-900/50 disabled:opacity-50"
+                    title="Send DTR/RTS reset sequence to enter bootloader"
+                  >
+                    {bootAttempting ? "Sending signals..." : "⚡ Force Boot Mode"}
+                  </button>
+                </div>
+
+                {/* Boot mode instructions - tabbed by board type */}
                 <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4">
-                  <p className="mb-2 text-xs font-medium text-gray-300">
-                    If connection fails, enter bootloader mode:
+                  <p className="mb-3 text-xs font-medium text-gray-300">
+                    If auto-boot fails, enter bootloader mode manually:
                   </p>
-                  <ol className="list-inside list-decimal space-y-1 text-xs text-gray-400">
-                    <li>Hold the <strong className="text-gray-300">BOOT</strong> (GPIO0) button</li>
-                    <li>Press and release <strong className="text-gray-300">RESET</strong> (EN) button</li>
-                    <li>Release the <strong className="text-gray-300">BOOT</strong> button</li>
-                    <li>Click &quot;Select USB Port&quot; above</li>
-                  </ol>
+
+                  <div className="space-y-3">
+                    {/* Generic ESP32 */}
+                    <details className="group">
+                      <summary className="cursor-pointer text-xs font-medium text-blue-400 hover:text-blue-300">
+                        ESP32 / ESP32-S2 (USB-UART bridge)
+                      </summary>
+                      <ol className="mt-2 list-inside list-decimal space-y-1 pl-2 text-xs text-gray-400">
+                        <li>Hold the <strong className="text-gray-300">BOOT</strong> (GPIO0) button</li>
+                        <li>Press and release <strong className="text-gray-300">RESET</strong> (EN) button</li>
+                        <li>Release the <strong className="text-gray-300">BOOT</strong> button</li>
+                        <li>Click &quot;Select USB Port&quot; above</li>
+                      </ol>
+                    </details>
+
+                    {/* XIAO ESP32-C6 */}
+                    <details className="group" open>
+                      <summary className="cursor-pointer text-xs font-medium text-blue-400 hover:text-blue-300">
+                        XIAO ESP32-C6 / ESP32-C3 (native USB)
+                      </summary>
+                      <ol className="mt-2 list-inside list-decimal space-y-1 pl-2 text-xs text-gray-400">
+                        <li>Hold the <strong className="text-gray-300">BOOT</strong> (B) button on the board</li>
+                        <li>Press and release the <strong className="text-gray-300">RESET</strong> (R) button</li>
+                        <li>Release the <strong className="text-gray-300">BOOT</strong> button</li>
+                        <li>A <strong className="text-gray-300">new USB device</strong> may appear (USB Serial/JTAG)</li>
+                        <li>Click &quot;Select USB Port&quot; and choose the <strong className="text-gray-300">USB JTAG/serial debug unit</strong></li>
+                      </ol>
+                      <p className="mt-2 text-xs text-yellow-400/80">
+                        Tip: On XIAO C6, the BOOT (B) and RESET (R) buttons are tiny pads on the bottom of the board.
+                        After entering boot mode, the USB port may re-enumerate. Select the new port when prompted.
+                      </p>
+                    </details>
+
+                    {/* ESP32-S3 */}
+                    <details className="group">
+                      <summary className="cursor-pointer text-xs font-medium text-blue-400 hover:text-blue-300">
+                        ESP32-S3 (native USB OTG)
+                      </summary>
+                      <ol className="mt-2 list-inside list-decimal space-y-1 pl-2 text-xs text-gray-400">
+                        <li>Hold the <strong className="text-gray-300">BOOT</strong> (GPIO0) button</li>
+                        <li>Press and release <strong className="text-gray-300">RESET</strong></li>
+                        <li>Release <strong className="text-gray-300">BOOT</strong></li>
+                        <li>If using USB OTG port, the device re-enumerates as <strong className="text-gray-300">ESP32-S3</strong></li>
+                        <li>Select the new USB port when prompted</li>
+                      </ol>
+                    </details>
+                  </div>
                 </div>
               </div>
             )}

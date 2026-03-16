@@ -24,11 +24,11 @@ export function useFlash() {
   }, []);
 
   const connect = useCallback(
-    async (port: SerialPort) => {
+    async (port: SerialPort, autoBootMode = true) => {
       setError(null);
       try {
         flashRef.current = new FlashManager(addLog, setProgress);
-        const info = await flashRef.current.connect(port);
+        const info = await flashRef.current.connect(port, autoBootMode);
         setChipInfo(info);
         setIsConnected(true);
         return info;

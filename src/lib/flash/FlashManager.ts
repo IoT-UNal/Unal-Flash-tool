@@ -37,8 +37,47 @@ export class FlashManager {
     return this.loader !== null;
   }
 
+  /** Attempt to enter ESP32 bootloader mode via serial signals */
+  async enterBootMode(port: SerialPort): Promise<void> {
+    this.onLog("Attempting to enter boot mode...");
+
+    // Strategy 1: Classic DTR/RTS reset (works with CP2102, CH340, FTDI bridges)
+    // RTS → EN (reset), DTR → GPIO0 (boot select)
+    try {
+      this.onLog("  Strategy 1: Classic DTR/RTS reset sequence...");
+      await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+      await new Promise((r) => setTimeout(r, 100));
+      await port.setSignals({ dataTerminalReady: true, requestToSend: false });
+      await new Promise((r) => setTimeout(r, 50));
+      await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+      await new Promise((r) => setTimeout(r, 50));
+    } catch {
+      this.onLog("  Strategy 1 failed (signals not supported)");
+    }
+
+    // Strategy 2: USB CDC boot — for native USB chips (ESP32-C3/C6/S2/S3/H2)
+    // Toggle DTR+RTS together, then release — triggers USB-Serial/JTAG reset circuit
+    try {
+      this.onLog("  Strategy 2: USB CDC/JTAG reset sequence...");
+      await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+      await new Promise((r) => setTimeout(r, 100));
+      await port.setSignals({ dataTerminalReady: true, requestToSend: true });
+      await new Promise((r) => setTimeout(r, 100));
+      await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+      await new Promise((r) => setTimeout(r, 100));
+      await port.setSignals({ dataTerminalReady: true, requestToSend: false });
+      await new Promise((r) => setTimeout(r, 100));
+      await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+      await new Promise((r) => setTimeout(r, 400));
+    } catch {
+      this.onLog("  Strategy 2 failed (signals not supported)");
+    }
+
+    this.onLog("Boot mode sequence completed.");
+  }
+
   /** Connect to ESP chip via serial port and detect chip */
-  async connect(port: SerialPort): Promise<ChipInfo> {
+  async connect(port: SerialPort, autoBootMode = true): Promise<ChipInfo> {
     this.onProgress({
       fileIndex: 0,
       totalFiles: 0,
@@ -48,6 +87,15 @@ export class FlashManager {
       status: "connecting",
       message: "Connecting to device...",
     });
+
+    // Try boot mode entry before connecting if enabled
+    if (autoBootMode) {
+      try {
+        await this.enterBootMode(port);
+      } catch {
+        this.onLog("Auto boot mode entry skipped.");
+      }
+    }
 
     this.transport = new Transport(port, true);
 
