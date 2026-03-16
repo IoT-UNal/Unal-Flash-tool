@@ -43,7 +43,7 @@ jobs:
         run: |
           export ZEPHYR_BASE=/tmp/zephyrproject/zephyr
           cd /tmp/zephyrproject
-          west build -b xiao_esp32c6/esp32c6/hpcore \
+          west build -b xiao_esp32c6/esp32c6 \
             $GITHUB_WORKSPACE/firmware/zephyr-hello \
             -d $GITHUB_WORKSPACE/firmware/zephyr-hello/build
 
