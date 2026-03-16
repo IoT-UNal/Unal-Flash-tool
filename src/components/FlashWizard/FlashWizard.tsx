@@ -28,7 +28,7 @@ const STEPS: { key: WizardStep; label: string; num: number }[] = [
 interface SegmentFile {
   name: string;
   data: Uint8Array;
-  role: "bootloader" | "partition" | "application" | "custom";
+  role: "bootloader" | "partition" | "application" | "merged" | "custom";
 }
 
 /** Convert Uint8Array to binary string for esptool-js */
@@ -74,11 +74,12 @@ export default function FlashWizard() {
       setSelectedRelease(release);
       const buffer = await firmware.downloadBinary(asset.id);
       if (buffer) {
+        const isMerged = asset.name.includes("merged");
         setSegmentFiles([
           {
             name: asset.name || "firmware.bin",
             data: new Uint8Array(buffer),
-            role: "application",
+            role: isMerged ? "merged" : "application",
           },
         ]);
         setStep("configure");
@@ -127,17 +128,23 @@ export default function FlashWizard() {
     setStep("flash");
     try {
       // Build segments from uploaded files
+      const mergedFile = segmentFiles.find((s) => s.role === "merged");
       const appFile = segmentFiles.find((s) => s.role === "application");
       const bootFile = segmentFiles.find((s) => s.role === "bootloader");
       const partFile = segmentFiles.find((s) => s.role === "partition");
 
-      if (!appFile) throw new Error("Application firmware is required");
-
-      const segments = flash.buildSegments(
-        toBinaryString(appFile.data),
-        bootFile ? toBinaryString(bootFile.data) : undefined,
-        partFile ? toBinaryString(partFile.data) : undefined
-      );
+      let segments;
+      if (mergedFile) {
+        // Merged binary — flash at offset 0x0
+        segments = [{ data: toBinaryString(mergedFile.data), address: 0x0, name: mergedFile.name }];
+      } else {
+        if (!appFile) throw new Error("Application firmware is required");
+        segments = flash.buildSegments(
+          toBinaryString(appFile.data),
+          bootFile ? toBinaryString(bootFile.data) : undefined,
+          partFile ? toBinaryString(partFile.data) : undefined
+        );
+      }
 
       // Add custom segments
       const customFiles = segmentFiles.filter((s) => s.role === "custom");
@@ -384,7 +391,7 @@ export default function FlashWizard() {
               >
                 ← Back
               </button>
-              {segmentFiles.some((s) => s.role === "application") && (
+              {segmentFiles.some((s) => s.role === "application" || s.role === "merged") && (
                 <button
                   onClick={() => setStep("configure")}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
