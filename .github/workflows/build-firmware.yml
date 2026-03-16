@@ -1,0 +1,72 @@
+name: Build & Release Firmware
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run -d firmware/hello-world
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          cp firmware/hello-world/.pio/build/esp32/firmware.bin release-assets/esp32-hello-world.bin
+          cp firmware/hello-world/.pio/build/esp32/bootloader.bin release-assets/esp32-bootloader.bin 2>/dev/null || true
+          cp firmware/hello-world/.pio/build/esp32/partitions.bin release-assets/esp32-partitions.bin 2>/dev/null || true
+
+      - name: Create firmware manifest
+        run: |
+          cat > release-assets/firmware-manifest.json << 'EOF'
+          {
+            "name": "UNAL Hello World",
+            "version": "${{ github.ref_name }}",
+            "description": "Test firmware for UNAL Flash Tool — blinks LED and prints to serial",
+            "targets": [
+              {
+                "chipFamily": "ESP32",
+                "segments": [
+                  { "name": "application", "file": "esp32-hello-world.bin", "offset": "0x10000" }
+                ]
+              }
+            ]
+          }
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Firmware ${{ github.ref_name }}"
+          body: |
+            ## UNAL Flash Tool — Hello World Firmware ${{ github.ref_name }}
+
+            Test firmware para verificar la plataforma de flasheo.
+
+            **Funcionalidades:**
+            - Parpadea LED integrado (GPIO 2)
+            - Imprime info del chip por serial (115200 baud)
+            - Heartbeat cada segundo
+
+            **Cómo flashear:**
+            1. Abre http://localhost:3000/flash
+            2. Selecciona este release desde "GitHub Releases"
+            3. Conecta y flashea tu ESP32
+          files: release-assets/*
+          generate_release_notes: true
