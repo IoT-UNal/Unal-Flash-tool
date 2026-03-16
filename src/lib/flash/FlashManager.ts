@@ -118,12 +118,14 @@ export class FlashManager {
       const chipName = await this.loader.main();
       const macAddr = await this.loader.chip.readMac(this.loader);
 
-      // Detect flash size
-      const flashSize = 0;
+      // Detect flash size (getFlashSize returns KB)
+      let flashSize = 0;
       try {
-        await this.loader.flashId();
-        // flashId() logs the detected flash size but returns void.
-        // We parse from the loader's internal state if available.
+        const flashSizeKB = await this.loader.getFlashSize();
+        if (flashSizeKB) {
+          flashSize = flashSizeKB * 1024;
+          this.onLog(`Detected flash size: ${this.formatFlashSize(flashSize)}`);
+        }
       } catch {
         this.onLog("Could not auto-detect flash size");
       }

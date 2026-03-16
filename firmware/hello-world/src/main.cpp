@@ -7,15 +7,17 @@
  *   1. Flashing via the Flash Wizard
  *   2. Serial monitoring via the Terminal page
  *
- * Board: ESP32 DevKit (any variant)
- * LED:   GPIO 2 (built-in on most ESP32 dev boards)
+ * Board: ESP32 DevKit / XIAO ESP32-C6 / any ESP32 variant
+ * LED:   Defined by build flag LED_PIN (GPIO 15 on XIAO C6, GPIO 2 on classic)
  * Baud:  115200
  */
 
 #include <Arduino.h>
 #include <WiFi.h>
 
-const int LED_PIN = LED_BUILTIN; // GPIO 2 on most ESP32 boards
+#ifndef LED_PIN
+#define LED_PIN 2
+#endif
 unsigned long counter = 0;
 
 void printDeviceInfo() {
@@ -32,7 +34,7 @@ void printDeviceInfo() {
   Serial.println("========================================");
   Serial.println();
   Serial.println("Flash successful! Serial monitor working.");
-  Serial.println("LED should be blinking on GPIO 2.");
+  Serial.printf("LED should be blinking on GPIO %d.\n", LED_PIN);
   Serial.println();
 }
 

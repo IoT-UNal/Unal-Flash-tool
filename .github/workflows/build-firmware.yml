@@ -22,28 +22,48 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio esptool
 
-      - name: Build firmware
+      - name: Build all firmware targets
         run: pio run -d firmware/hello-world
 
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          BUILD=firmware/hello-world/.pio/build/esp32
-          cp $BUILD/firmware.bin release-assets/esp32-hello-world.bin
-          cp $BUILD/bootloader.bin release-assets/esp32-bootloader.bin 2>/dev/null || true
-          cp $BUILD/partitions.bin release-assets/esp32-partitions.bin 2>/dev/null || true
 
-      - name: Create merged binary
+          # ESP32 assets
+          BUILD_ESP32=firmware/hello-world/.pio/build/esp32
+          cp $BUILD_ESP32/firmware.bin release-assets/esp32-hello-world.bin
+          cp $BUILD_ESP32/bootloader.bin release-assets/esp32-bootloader.bin 2>/dev/null || true
+          cp $BUILD_ESP32/partitions.bin release-assets/esp32-partitions.bin 2>/dev/null || true
+
+          # ESP32-C6 XIAO assets
+          BUILD_C6=firmware/hello-world/.pio/build/esp32c6-xiao
+          cp $BUILD_C6/firmware.bin release-assets/esp32c6-xiao-hello-world.bin
+          cp $BUILD_C6/bootloader.bin release-assets/esp32c6-xiao-bootloader.bin 2>/dev/null || true
+          cp $BUILD_C6/partitions.bin release-assets/esp32c6-xiao-partitions.bin 2>/dev/null || true
+
+      - name: Create merged binaries
         run: |
-          BUILD=firmware/hello-world/.pio/build/esp32
+          # ESP32 merged binary
+          BUILD_ESP32=firmware/hello-world/.pio/build/esp32
           esptool.py --chip esp32 merge_bin \
             -o release-assets/esp32-hello-world-merged.bin \
             --flash_mode dio \
             --flash_freq 40m \
             --flash_size 4MB \
-            0x1000 $BUILD/bootloader.bin \
-            0x8000 $BUILD/partitions.bin \
-            0x10000 $BUILD/firmware.bin
+            0x1000 $BUILD_ESP32/bootloader.bin \
+            0x8000 $BUILD_ESP32/partitions.bin \
+            0x10000 $BUILD_ESP32/firmware.bin
+
+          # ESP32-C6 merged binary
+          BUILD_C6=firmware/hello-world/.pio/build/esp32c6-xiao
+          esptool.py --chip esp32c6 merge_bin \
+            -o release-assets/esp32c6-xiao-hello-world-merged.bin \
+            --flash_mode dio \
+            --flash_freq 80m \
+            --flash_size 4MB \
+            0x0 $BUILD_C6/bootloader.bin \
+            0x8000 $BUILD_C6/partitions.bin \
+            0x10000 $BUILD_C6/firmware.bin
 
       - name: Create firmware manifest
         run: |
@@ -61,6 +81,15 @@ jobs:
                   { "name": "bootloader", "file": "esp32-bootloader.bin", "offset": "0x1000" },
                   { "name": "partitions", "file": "esp32-partitions.bin", "offset": "0x8000" }
                 ]
+              },
+              {
+                "chipFamily": "ESP32-C6",
+                "segments": [
+                  { "name": "merged (recommended)", "file": "esp32c6-xiao-hello-world-merged.bin", "offset": "0x0" },
+                  { "name": "application", "file": "esp32c6-xiao-hello-world.bin", "offset": "0x10000" },
+                  { "name": "bootloader", "file": "esp32c6-xiao-bootloader.bin", "offset": "0x0" },
+                  { "name": "partitions", "file": "esp32c6-xiao-partitions.bin", "offset": "0x8000" }
+                ]
               }
             ]
           }
@@ -75,20 +104,26 @@ jobs:
 
             Test firmware para verificar la plataforma de flasheo.
 
-            **Archivos:**
-            - `esp32-hello-world-merged.bin` — **Binario unificado (recomendado)** — se flashea en offset `0x0`
+            ### ESP32 (esp32dev)
+            - `esp32-hello-world-merged.bin` — **Binario unificado (recomendado)** — offset `0x0`
             - `esp32-hello-world.bin` — Solo aplicación (offset `0x10000`)
             - `esp32-bootloader.bin` — Bootloader (offset `0x1000`)
             - `esp32-partitions.bin` — Tabla de particiones (offset `0x8000`)
 
+            ### ESP32-C6 XIAO (seeed_xiao_esp32c6)
+            - `esp32c6-xiao-hello-world-merged.bin` — **Binario unificado (recomendado)** — offset `0x0`
+            - `esp32c6-xiao-hello-world.bin` — Solo aplicación (offset `0x10000`)
+            - `esp32c6-xiao-bootloader.bin` — Bootloader (offset `0x0`)
+            - `esp32c6-xiao-partitions.bin` — Tabla de particiones (offset `0x8000`)
+
             **Funcionalidades:**
-            - Parpadea LED integrado (GPIO 2)
+            - Parpadea LED integrado (GPIO 2 en ESP32, GPIO 15 en XIAO C6)
             - Imprime info del chip por serial (115200 baud)
             - Heartbeat cada segundo
 
             **Cómo flashear:**
             1. Abre http://localhost:3000/flash
-            2. Selecciona este release → elige `esp32-hello-world-merged.bin`
+            2. Selecciona este release → elige el binario merged para tu placa
             3. Conecta y flashea tu ESP32
           files: release-assets/*
           generate_release_notes: true
