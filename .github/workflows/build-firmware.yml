@@ -22,7 +22,7 @@ jobs:
 
       - name: Install west and dependencies
         run: |
-          pip install west
+          pip install west patool
 
       - name: Initialize Zephyr workspace
         run: |
@@ -31,13 +31,13 @@ jobs:
           cd zephyrproject
           west update --narrow -o=--depth=1
 
+      - name: Install Python requirements
+        run: pip install -r /tmp/zephyrproject/zephyr/scripts/requirements.txt
+
       - name: Install Zephyr SDK
         run: |
           cd /tmp/zephyrproject
           west sdk install -t riscv64-zephyr-elf
-
-      - name: Install Python requirements
-        run: pip install -r /tmp/zephyrproject/zephyr/scripts/requirements.txt
 
       - name: Build firmware (XIAO ESP32-C6)
         run: |
