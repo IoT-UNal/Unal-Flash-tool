@@ -13,6 +13,7 @@
  */
 
 #include <Arduino.h>
+#include <WiFi.h>
 
 const int LED_PIN = LED_BUILTIN; // GPIO 2 on most ESP32 boards
 unsigned long counter = 0;
