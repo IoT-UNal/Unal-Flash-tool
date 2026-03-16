@@ -40,5 +40,8 @@ firmware/**/.pio
 firmware/**/lib
 firmware/**/.vscode
 
+# Zephyr build
+firmware/**/build/
+
 # env
 .env
