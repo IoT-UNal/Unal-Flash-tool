@@ -51,7 +51,7 @@ jobs:
         run: |
           mkdir -p release-assets
           BUILD_DIR=$GITHUB_WORKSPACE/firmware/zephyr-hello/build/zephyr
-          cp $BUILD_DIR/zephyr.bin release-assets/esp32c6-xiao-zephyr.bin
+          cp $BUILD_DIR/zephyr.bin release-assets/esp32c6-xiao-zephyr-merged.bin
 
       - name: Create firmware manifest
         run: |
@@ -64,7 +64,7 @@ jobs:
               {
                 "chipFamily": "ESP32-C6",
                 "segments": [
-                  { "name": "firmware", "file": "esp32c6-xiao-zephyr.bin", "offset": "0x0" }
+                  { "name": "firmware", "file": "esp32c6-xiao-zephyr-merged.bin", "offset": "0x0" }
                 ]
               }
             ]
@@ -81,7 +81,7 @@ jobs:
             Firmware compilado con **Zephyr RTOS** para XIAO ESP32-C6.
 
             ### ESP32-C6 XIAO (seeed_xiao_esp32c6)
-            - `esp32c6-xiao-zephyr.bin` — **Binario único** — offset `0x0`
+            - `esp32c6-xiao-zephyr-merged.bin` — **Binario único (bootloader + app)** — offset `0x0`
 
             **Funcionalidades:**
             - Parpadea LED integrado (GPIO 15)
@@ -91,6 +91,6 @@ jobs:
             **Cómo flashear:**
             1. Abre http://localhost:3000/flash
             2. Selecciona este release → elige `esp32c6-xiao-zephyr.bin`
-            3. Conecta tu XIAO ESP32-C6 y flashea a offset `0x0`
+            3. Conecta tu XIAO ESP32-C6 y flashea (se flashea automáticamente a offset `0x0`)
           files: release-assets/*
           generate_release_notes: true
