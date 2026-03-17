@@ -42,6 +42,10 @@ firmware/**/.vscode
 
 # Zephyr build
 firmware/**/build/
+firmware/**/*.bin
+
+# IDE
+.vscode/
 
 # env
 .env

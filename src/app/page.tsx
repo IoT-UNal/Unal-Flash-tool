@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useSerial } from "@/hooks/useSerial";
+import ArchitectureDiagram from "@/components/ArchitectureDiagram/ArchitectureDiagram";
 
 export default function DashboardPage() {
   const { state, deviceName, isSupported } = useSerial();
@@ -133,21 +134,7 @@ export default function DashboardPage() {
       {/* Architecture Overview */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
         <h2 className="text-lg font-semibold text-white mb-4">Architecture</h2>
-        <pre className="text-xs text-gray-400 font-mono overflow-x-auto">
-{`┌─────────────────────────────────────────────────────────────────┐
-│                    UNAL Flash Tool (Next.js)                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐    │
-│  │  Flash Tool   │  │ Serial Term  │  │ Credential Manager │    │
-│  │  (esptool-js) │  │  (xterm.js)  │  │  (NVS Writer)      │    │
-│  └──────┬───────┘  └──────┬───────┘  └────────┬───────────┘    │
-│         └─────────────────┴────────────────────┘                │
-│                    Web Serial API (Chrome/Edge 89+)             │
-├─────────────────────────────────────────────────────────────────┤
-│  API Routes:  /api/firmware  /api/builds  /api/credentials      │
-├─────────────────────────────────────────────────────────────────┤
-│  GitHub Releases → binarios  │  GitHub Actions → builds CI/CD   │
-└─────────────────────────────────────────────────────────────────┘`}
-        </pre>
+        <ArchitectureDiagram />
       </div>
     </div>
   );

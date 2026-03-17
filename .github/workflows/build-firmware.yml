@@ -39,7 +39,7 @@ jobs:
           cd /tmp/zephyrproject
           west sdk install -t riscv64-zephyr-elf
 
-      - name: Build firmware (XIAO ESP32-C6)
+      - name: Build Hello World firmware (XIAO ESP32-C6)
         run: |
           export ZEPHYR_BASE=/tmp/zephyrproject/zephyr
           cd /tmp/zephyrproject
@@ -47,24 +47,35 @@ jobs:
             $GITHUB_WORKSPACE/firmware/zephyr-hello \
             -d $GITHUB_WORKSPACE/firmware/zephyr-hello/build
 
+      - name: Build WiFi firmware (XIAO ESP32-C6)
+        run: |
+          export ZEPHYR_BASE=/tmp/zephyrproject/zephyr
+          cd /tmp/zephyrproject
+          west build -b xiao_esp32c6/esp32c6 \
+            $GITHUB_WORKSPACE/firmware/zephyr-wifi \
+            -d $GITHUB_WORKSPACE/firmware/zephyr-wifi/build
+
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          BUILD_DIR=$GITHUB_WORKSPACE/firmware/zephyr-hello/build/zephyr
-          cp $BUILD_DIR/zephyr.bin release-assets/esp32c6-xiao-zephyr-merged.bin
+          HELLO_DIR=$GITHUB_WORKSPACE/firmware/zephyr-hello/build/zephyr
+          WIFI_DIR=$GITHUB_WORKSPACE/firmware/zephyr-wifi/build/zephyr
+          cp $HELLO_DIR/zephyr.bin release-assets/esp32c6-xiao-zephyr-merged.bin
+          cp $WIFI_DIR/zephyr.bin release-assets/esp32c6-xiao-wifi-merged.bin
 
       - name: Create firmware manifest
         run: |
           cat > release-assets/firmware-manifest.json << 'EOF'
           {
-            "name": "UNAL Hello World (Zephyr)",
+            "name": "UNAL Firmware Collection (Zephyr)",
             "version": "${{ github.ref_name }}",
-            "description": "Zephyr RTOS firmware — blinks LED and prints heartbeat via UART",
+            "description": "Zephyr RTOS firmware for XIAO ESP32-C6",
             "targets": [
               {
                 "chipFamily": "ESP32-C6",
                 "segments": [
-                  { "name": "firmware", "file": "esp32c6-xiao-zephyr-merged.bin", "offset": "0x0" }
+                  { "name": "hello-world", "file": "esp32c6-xiao-zephyr-merged.bin", "offset": "0x0" },
+                  { "name": "wifi", "file": "esp32c6-xiao-wifi-merged.bin", "offset": "0x0" }
                 ]
               }
             ]
@@ -81,16 +92,25 @@ jobs:
             Firmware compilado con **Zephyr RTOS** para XIAO ESP32-C6.
 
             ### ESP32-C6 XIAO (seeed_xiao_esp32c6)
-            - `esp32c6-xiao-zephyr-merged.bin` — **Binario único (bootloader + app)** — offset `0x0`
 
-            **Funcionalidades:**
-            - Parpadea LED integrado (GPIO 15)
-            - Imprime info del board y heartbeat por serial (115200 baud)
-            - Heartbeat cada segundo con contador y uptime
+            #### Hello World
+            - `esp32c6-xiao-zephyr-merged.bin` — **Binario único (bootloader + app)** — offset `0x0`
+            - LED blink (GPIO 15) + heartbeat serial (115200 baud)
+
+            #### WiFi (con provisioning)
+            - `esp32c6-xiao-wifi-merged.bin` — **Binario único (bootloader + app)** — offset `0x0`
+            - Conexión WiFi STA con credenciales almacenadas en NVS
+            - Provisioning via protocolo serial PROV:* desde la web
+            - LED indica estado: rápido=sin credenciales, medio=conectando, lento=conectado
 
             **Cómo flashear:**
             1. Abre http://localhost:3000/flash
-            2. Selecciona este release → elige `esp32c6-xiao-zephyr.bin`
-            3. Conecta tu XIAO ESP32-C6 y flashea (se flashea automáticamente a offset `0x0`)
+            2. Selecciona este release → elige el firmware deseado
+            3. Conecta tu XIAO ESP32-C6 y flashea (offset automático `0x0`)
+
+            **Configurar WiFi (después de flashear wifi):**
+            1. Ve a http://localhost:3000/credentials
+            2. Ingresa SSID y password
+            3. Click "Write to Device (NVS)"
           files: release-assets/*
           generate_release_notes: true

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Link from "next/link";
 import { useSerial } from "@/hooks/useSerial";
 import { useFlash } from "@/hooks/useFlash";
 import { useFirmware } from "@/hooks/useFirmware";
@@ -677,6 +678,14 @@ export default function FlashWizard() {
                 >
                   Disconnect
                 </button>
+                {flash.progress?.status === "done" && segmentFiles.some(s => s.name.includes("wifi")) && (
+                  <Link
+                    href="/credentials"
+                    className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
+                  >
+                    Configure WiFi →
+                  </Link>
+                )}
                 {flash.progress?.status === "error" && (
                   <button
                     onClick={handleFlash}
