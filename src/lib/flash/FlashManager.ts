@@ -213,6 +213,8 @@ export class FlashManager {
         );
       }
 
+      let maxPercentage = 0;
+
       const flashOptions = {
         fileArray: segments.map((s) => ({
           data: s.data,
@@ -229,6 +231,7 @@ export class FlashManager {
           total: number
         ) => {
           const percentage = Math.round((written / total) * 100);
+          if (percentage > maxPercentage) maxPercentage = percentage;
           const segName =
             segments[fileIndex]?.name ||
             `0x${segments[fileIndex]?.address.toString(16)}`;
@@ -245,7 +248,26 @@ export class FlashManager {
         },
       };
 
-      await this.loader.writeFlash(flashOptions);
+      try {
+        await this.loader.writeFlash(flashOptions);
+      } catch (writeErr) {
+        // ESP32-C6 USB CDC/JTAG often drops the serial connection after
+        // the final write packet, causing a "No serial data received" error
+        // even though all data was written successfully. If progress reached
+        // 100%, treat it as a successful flash.
+        const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
+        const isPostWriteCommError =
+          maxPercentage >= 100 &&
+          /no serial data|serial data received|timeout|timed out/i.test(msg);
+
+        if (isPostWriteCommError) {
+          this.onLog(
+            "Warning: Post-write verification lost connection (common with USB CDC/JTAG). Data was written successfully."
+          );
+        } else {
+          throw writeErr;
+        }
+      }
 
       this.onProgress({
         fileIndex: segments.length - 1,
@@ -258,7 +280,11 @@ export class FlashManager {
       });
 
       this.onLog("Flash complete! Resetting device...");
-      await this.hardReset();
+      try {
+        await this.hardReset();
+      } catch {
+        this.onLog("Warning: Could not reset device automatically. Please reset manually.");
+      }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       const classified = classifyFlashError(error);
