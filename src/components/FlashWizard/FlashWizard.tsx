@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useSerial } from "@/hooks/useSerial";
 import { useFlash } from "@/hooks/useFlash";
@@ -14,6 +14,20 @@ import {
   FLASH_FREQS,
   FLASH_SIZES,
 } from "@/lib/flash/types";
+import {
+  generateWifiConfigBlob,
+  configBlobToBinaryString,
+  WIFI_CONFIG_FLASH_OFFSET,
+} from "@/lib/config/WifiConfigGenerator";
+import {
+  generateLedConfigBlob,
+  ledConfigBlobToBinaryString,
+  LED_CONFIG_FLASH_OFFSET,
+  LedMode,
+  LED_MODE_LABELS,
+  DEFAULT_LED_CONFIG,
+  type LedConfig,
+} from "@/lib/config/LedConfigGenerator";
 import ChipInfoCard from "./ChipInfoCard";
 import FlashProgressPanel from "./FlashProgressPanel";
 
@@ -44,6 +58,8 @@ function toBinaryString(data: Uint8Array): string {
   return chunks.join("");
 }
 
+type UploadMode = "merged" | "segments";
+
 export default function FlashWizard() {
   const [step, setStep] = useState<WizardStep>("connect");
   const [selectedRelease, setSelectedRelease] = useState<FirmwareRelease | null>(null);
@@ -51,9 +67,26 @@ export default function FlashWizard() {
   const [flashOptions, setFlashOptions] = useState<FlashOptions>(DEFAULT_FLASH_OPTIONS);
   const [autoBootMode, setAutoBootMode] = useState(true);
   const [bootAttempting, setBootAttempting] = useState(false);
+  const [uploadMode, setUploadMode] = useState<UploadMode>("merged");
+  const [isWifiFirmware, setIsWifiFirmware] = useState(false);
+  const [isRgbFirmware, setIsRgbFirmware] = useState(false);
+  const [wifiSsid, setWifiSsid] = useState("");
+  const [wifiPassword, setWifiPassword] = useState("");
+  const [ledConfig, setLedConfig] = useState<LedConfig>(DEFAULT_LED_CONFIG);
   const serial = useSerial();
   const flash = useFlash();
   const firmware = useFirmware();
+
+  // Ref for cleanup — avoids stale closure in useEffect teardown
+  const flashDisconnectRef = useRef(flash.disconnect);
+  flashDisconnectRef.current = flash.disconnect;
+
+  // Cleanup on unmount: disconnect flash to release the serial port
+  useEffect(() => {
+    return () => {
+      flashDisconnectRef.current().catch(() => {});
+    };
+  }, []);
 
   const currentStepIdx = STEPS.findIndex((s) => s.key === step);
 
@@ -61,6 +94,10 @@ export default function FlashWizard() {
   const handleConnect = useCallback(async () => {
     try {
       const manager = SerialManager.getInstance();
+      // Close any existing SerialManager connection (from Terminal page)
+      if (manager.isConnected) {
+        await manager.close();
+      }
       await manager.requestPort();
       const port = manager.getPort();
       if (!port) throw new Error("No port selected");
@@ -126,6 +163,13 @@ export default function FlashWizard() {
       const buffer = await firmware.downloadBinary(asset.id);
       if (buffer) {
         const isMerged = asset.name.includes("merged");
+        const nameLc = asset.name.toLowerCase();
+        if (nameLc.includes("wifi") || nameLc.includes("rgb")) {
+          setIsWifiFirmware(true);
+        }
+        if (nameLc.includes("rgb")) {
+          setIsRgbFirmware(true);
+        }
         setSegmentFiles([
           {
             name: asset.name || "firmware.bin",
@@ -148,11 +192,18 @@ export default function FlashWizard() {
       reader.onload = () => {
         const data = new Uint8Array(reader.result as ArrayBuffer);
         setSegmentFiles((prev) => {
-          // Replace if same role already exists
           const filtered = prev.filter((s) => s.role !== role);
           return [...filtered, { name: file.name, data, role }];
         });
-        if (role === "application") {
+        // Auto-detect wifi/rgb firmware from filename
+        const nameLc = file.name.toLowerCase();
+        if (nameLc.includes("wifi") || nameLc.includes("rgb")) {
+          setIsWifiFirmware(true);
+        }
+        if (nameLc.includes("rgb")) {
+          setIsRgbFirmware(true);
+        }
+        if (role === "application" || role === "merged") {
           setSelectedRelease({
             id: 0,
             tagName: "local",
@@ -202,8 +253,31 @@ export default function FlashWizard() {
       for (const cf of customFiles) {
         segments.push({
           data: toBinaryString(cf.data),
-          address: 0x10000, // Custom segments would need a user-specified address
+          address: 0x10000,
           name: cf.name,
+        });
+      }
+
+      // Add WiFi config blob if WiFi firmware + credentials provided
+      if (isWifiFirmware && wifiSsid.trim()) {
+        const configBlob = generateWifiConfigBlob({
+          ssid: wifiSsid.trim(),
+          password: wifiPassword,
+        });
+        segments.push({
+          data: configBlobToBinaryString(configBlob),
+          address: WIFI_CONFIG_FLASH_OFFSET,
+          name: "WiFi Config",
+        });
+      }
+
+      // Add LED config blob if RGB firmware
+      if (isRgbFirmware) {
+        const ledBlob = generateLedConfigBlob(ledConfig);
+        segments.push({
+          data: ledConfigBlobToBinaryString(ledBlob),
+          address: LED_CONFIG_FLASH_OFFSET,
+          name: "LED Config",
         });
       }
 
@@ -211,15 +285,26 @@ export default function FlashWizard() {
     } catch (err) {
       console.error("Flash failed:", err);
     }
-  }, [segmentFiles, flash, flashOptions]);
+  }, [segmentFiles, flash, flashOptions, isWifiFirmware, isRgbFirmware, wifiSsid, wifiPassword, ledConfig]);
 
-  const handleReset = useCallback(() => {
+  const handleReset = useCallback(async () => {
+    try {
+      await flash.disconnect();
+    } catch {
+      /* ignore */
+    }
     flash.clearLogs();
     flash.clearError();
     setStep("connect");
     setSelectedRelease(null);
     setSegmentFiles([]);
     setFlashOptions(DEFAULT_FLASH_OPTIONS);
+    setIsWifiFirmware(false);
+    setIsRgbFirmware(false);
+    setWifiSsid("");
+    setWifiPassword("");
+    setLedConfig(DEFAULT_LED_CONFIG);
+    setUploadMode("merged");
   }, [flash]);
 
   return (
@@ -319,10 +404,10 @@ export default function FlashWizard() {
                 <div className="flex flex-wrap gap-3">
                   <button
                     onClick={handleConnect}
-                    disabled={serial.state === "connecting"}
+                    disabled={flash.isConnecting}
                     className="rounded-lg bg-blue-600 px-6 py-3 font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-800 disabled:text-blue-400"
                   >
-                    {serial.state === "connecting" ? "Connecting..." : "Select USB Port"}
+                    {flash.isConnecting ? "Connecting..." : "Select USB Port"}
                   </button>
 
                   <button
@@ -404,42 +489,91 @@ export default function FlashWizard() {
           <div className="space-y-4">
             <h2 className="text-lg font-semibold text-white">Select Firmware</h2>
             <p className="text-sm text-gray-400">
-              Upload firmware binaries or choose from GitHub releases. You can upload
-              multiple segments (bootloader, partition table, application).
+              Upload a firmware binary or choose from GitHub releases.
             </p>
 
-            {/* Multi-segment upload */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium text-white">Firmware Segments</h3>
-
-              <SegmentUpload
-                role="application"
-                label="Application Binary"
-                required
-                description="Main firmware (.bin) — flashed at 0x10000"
-                file={segmentFiles.find((s) => s.role === "application")}
-                onUpload={(e) => handleFileUpload(e, "application")}
-                onRemove={() => removeSegment("application")}
-              />
-
-              <SegmentUpload
-                role="bootloader"
-                label="Bootloader (optional)"
-                description={`Bootloader binary — flashed at 0x${flash.getBootloaderOffset().toString(16)}`}
-                file={segmentFiles.find((s) => s.role === "bootloader")}
-                onUpload={(e) => handleFileUpload(e, "bootloader")}
-                onRemove={() => removeSegment("bootloader")}
-              />
-
-              <SegmentUpload
-                role="partition"
-                label="Partition Table (optional)"
-                description="Partition table — flashed at 0x8000"
-                file={segmentFiles.find((s) => s.role === "partition")}
-                onUpload={(e) => handleFileUpload(e, "partition")}
-                onRemove={() => removeSegment("partition")}
-              />
+            {/* Upload mode tabs */}
+            <div className="flex rounded-lg border border-gray-700 overflow-hidden">
+              <button
+                onClick={() => { setUploadMode("merged"); setSegmentFiles([]); }}
+                className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
+                  uploadMode === "merged"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                }`}
+              >
+                Single Binary (Zephyr / Merged)
+              </button>
+              <button
+                onClick={() => { setUploadMode("segments"); setSegmentFiles([]); }}
+                className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
+                  uploadMode === "segments"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                }`}
+              >
+                Multi-segment (ESP-IDF)
+              </button>
             </div>
+
+            {/* Upload area */}
+            <div className="space-y-3">
+              {uploadMode === "merged" ? (
+                <>
+                  <SegmentUpload
+                    role="merged"
+                    label="Firmware Binary"
+                    required
+                    description="Single merged .bin file — flashed at offset 0x0"
+                    file={segmentFiles.find((s) => s.role === "merged")}
+                    onUpload={(e) => handleFileUpload(e, "merged")}
+                    onRemove={() => removeSegment("merged")}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Use this for Zephyr merged binaries or any pre-merged firmware image.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <SegmentUpload
+                    role="application"
+                    label="Application Binary"
+                    required
+                    description="Main firmware (.bin) — flashed at 0x10000"
+                    file={segmentFiles.find((s) => s.role === "application")}
+                    onUpload={(e) => handleFileUpload(e, "application")}
+                    onRemove={() => removeSegment("application")}
+                  />
+                  <SegmentUpload
+                    role="bootloader"
+                    label="Bootloader (optional)"
+                    description={`Bootloader binary — flashed at 0x${flash.getBootloaderOffset().toString(16)}`}
+                    file={segmentFiles.find((s) => s.role === "bootloader")}
+                    onUpload={(e) => handleFileUpload(e, "bootloader")}
+                    onRemove={() => removeSegment("bootloader")}
+                  />
+                  <SegmentUpload
+                    role="partition"
+                    label="Partition Table (optional)"
+                    description="Partition table — flashed at 0x8000"
+                    file={segmentFiles.find((s) => s.role === "partition")}
+                    onUpload={(e) => handleFileUpload(e, "partition")}
+                    onRemove={() => removeSegment("partition")}
+                  />
+                </>
+              )}
+            </div>
+
+            {/* WiFi firmware checkbox */}
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-300">
+              <input
+                type="checkbox"
+                checked={isWifiFirmware}
+                onChange={(e) => setIsWifiFirmware(e.target.checked)}
+                className="rounded border-gray-600 bg-gray-800 text-amber-600"
+              />
+              This firmware has WiFi support (show credential config after flash)
+            </label>
 
             <div className="border-t border-gray-800 pt-4">
               <h3 className="text-sm font-medium text-white">Or choose from GitHub Releases</h3>
@@ -632,6 +766,158 @@ export default function FlashWizard() {
               Compress data during transfer
             </label>
 
+            {/* WiFi Configuration — shown when isWifiFirmware is checked */}
+            {isWifiFirmware && (
+              <div className="rounded-lg border border-amber-800/50 bg-amber-900/10 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <svg className="h-4 w-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.858 15.355-5.858 21.213 0" />
+                  </svg>
+                  <span className="text-sm font-medium text-amber-300">WiFi Configuration</span>
+                </div>
+                <p className="mb-3 text-xs text-gray-400">
+                  Enter WiFi credentials below. A config binary will be flashed at offset 0x{WIFI_CONFIG_FLASH_OFFSET.toString(16).toUpperCase()} alongside the firmware.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400">WiFi SSID</label>
+                    <input
+                      type="text"
+                      value={wifiSsid}
+                      onChange={(e) => setWifiSsid(e.target.value)}
+                      placeholder="MyNetwork"
+                      maxLength={32}
+                      className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white placeholder-gray-600 focus:border-amber-600 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400">WiFi Password</label>
+                    <input
+                      type="password"
+                      value={wifiPassword}
+                      onChange={(e) => setWifiPassword(e.target.value)}
+                      placeholder="••••••••"
+                      maxLength={64}
+                      className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white placeholder-gray-600 focus:border-amber-600 focus:outline-none"
+                    />
+                  </div>
+                </div>
+                {!wifiSsid.trim() && (
+                  <p className="mt-2 text-xs text-yellow-400/70">
+                    Leave empty to flash firmware without WiFi config (credentials can be added later).
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* RGB LED Configuration — shown when isRgbFirmware is checked */}
+            {isRgbFirmware && (
+              <div className="rounded-lg border border-purple-800/50 bg-purple-900/10 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <svg className="h-4 w-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  <span className="text-sm font-medium text-purple-300">RGB LED Configuration</span>
+                </div>
+                <p className="mb-3 text-xs text-gray-400">
+                  Configure the onboard WS2812B LED. Settings are flashed at offset 0x{LED_CONFIG_FLASH_OFFSET.toString(16).toUpperCase()}.
+                </p>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Mode selector */}
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400">LED Mode</label>
+                    <select
+                      value={ledConfig.mode}
+                      onChange={(e) =>
+                        setLedConfig((c) => ({ ...c, mode: Number(e.target.value) as LedMode }))
+                      }
+                      className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white"
+                    >
+                      {Object.entries(LED_MODE_LABELS).map(([val, label]) => (
+                        <option key={val} value={val}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Color picker */}
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400">Color</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={`#${ledConfig.colorR.toString(16).padStart(2, "0")}${ledConfig.colorG.toString(16).padStart(2, "0")}${ledConfig.colorB.toString(16).padStart(2, "0")}`}
+                        onChange={(e) => {
+                          const hex = e.target.value.replace("#", "");
+                          setLedConfig((c) => ({
+                            ...c,
+                            colorR: parseInt(hex.substring(0, 2), 16),
+                            colorG: parseInt(hex.substring(2, 4), 16),
+                            colorB: parseInt(hex.substring(4, 6), 16),
+                          }));
+                        }}
+                        className="h-8 w-12 cursor-pointer rounded border border-gray-700 bg-gray-800"
+                      />
+                      <span className="text-xs text-gray-400">
+                        #{ledConfig.colorR.toString(16).padStart(2, "0")}
+                        {ledConfig.colorG.toString(16).padStart(2, "0")}
+                        {ledConfig.colorB.toString(16).padStart(2, "0")}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Brightness slider */}
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400">
+                      Brightness: {Math.round((ledConfig.brightness / 255) * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={255}
+                      value={ledConfig.brightness}
+                      onChange={(e) =>
+                        setLedConfig((c) => ({ ...c, brightness: Number(e.target.value) }))
+                      }
+                      className="w-full accent-purple-500"
+                    />
+                  </div>
+
+                  {/* Speed slider */}
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400">
+                      Speed: {Math.round((ledConfig.speed / 255) * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={255}
+                      value={ledConfig.speed}
+                      onChange={(e) =>
+                        setLedConfig((c) => ({ ...c, speed: Number(e.target.value) }))
+                      }
+                      className="w-full accent-purple-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Live preview */}
+                <div className="mt-3 flex items-center gap-2">
+                  <div
+                    className="h-5 w-5 rounded-full border border-gray-600"
+                    style={{
+                      backgroundColor: `rgb(${Math.round(ledConfig.colorR * ledConfig.brightness / 255)}, ${Math.round(ledConfig.colorG * ledConfig.brightness / 255)}, ${Math.round(ledConfig.colorB * ledConfig.brightness / 255)})`,
+                    }}
+                  />
+                  <span className="text-xs text-gray-400">
+                    {LED_MODE_LABELS[ledConfig.mode as LedMode]} — Preview at current brightness
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-3">
               <button
                 onClick={() => setStep("firmware")}
@@ -678,7 +964,15 @@ export default function FlashWizard() {
                 >
                   Disconnect
                 </button>
-                {flash.progress?.status === "done" && segmentFiles.some(s => s.name.includes("wifi")) && (
+                {flash.progress?.status === "done" && isWifiFirmware && wifiSsid.trim() && (
+                  <span className="flex items-center gap-1.5 rounded-lg bg-amber-900/30 px-4 py-2 text-sm text-amber-300">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    WiFi config flashed — device will connect to &quot;{wifiSsid}&quot;
+                  </span>
+                )}
+                {flash.progress?.status === "done" && isWifiFirmware && !wifiSsid.trim() && (
                   <Link
                     href="/credentials"
                     className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"

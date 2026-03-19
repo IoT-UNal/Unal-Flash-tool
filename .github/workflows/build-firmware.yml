@@ -55,32 +55,47 @@ jobs:
             $GITHUB_WORKSPACE/firmware/zephyr-wifi \
             -d $GITHUB_WORKSPACE/firmware/zephyr-wifi/build
 
+      - name: Build RGB WiFi firmware (ESP32-C6 Super Mini)
+        run: |
+          export ZEPHYR_BASE=/tmp/zephyrproject/zephyr
+          cd /tmp/zephyrproject
+          west build -b xiao_esp32c6/esp32c6 \
+            $GITHUB_WORKSPACE/firmware/zephyr-rgb \
+            -d $GITHUB_WORKSPACE/firmware/zephyr-rgb/build
+
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
           HELLO_DIR=$GITHUB_WORKSPACE/firmware/zephyr-hello/build/zephyr
           WIFI_DIR=$GITHUB_WORKSPACE/firmware/zephyr-wifi/build/zephyr
+          RGB_DIR=$GITHUB_WORKSPACE/firmware/zephyr-rgb/build/zephyr
           cp $HELLO_DIR/zephyr.bin release-assets/esp32c6-xiao-zephyr-merged.bin
           cp $WIFI_DIR/zephyr.bin release-assets/esp32c6-xiao-wifi-merged.bin
+          cp $RGB_DIR/zephyr.bin release-assets/esp32c6-supermini-rgb-wifi-merged.bin
+
+      - name: Generate default device config binary
+        run: node $GITHUB_WORKSPACE/scripts/generate-device-config.mjs release-assets/device-config-default.bin
 
       - name: Create firmware manifest
         run: |
-          cat > release-assets/firmware-manifest.json << 'EOF'
+          cat > release-assets/firmware-manifest.json << 'MANIFEST'
           {
             "name": "UNAL Firmware Collection (Zephyr)",
             "version": "${{ github.ref_name }}",
-            "description": "Zephyr RTOS firmware for XIAO ESP32-C6",
+            "description": "Zephyr RTOS firmware for ESP32-C6 boards",
             "targets": [
               {
                 "chipFamily": "ESP32-C6",
                 "segments": [
                   { "name": "hello-world", "file": "esp32c6-xiao-zephyr-merged.bin", "offset": "0x0" },
-                  { "name": "wifi", "file": "esp32c6-xiao-wifi-merged.bin", "offset": "0x0" }
+                  { "name": "wifi", "file": "esp32c6-xiao-wifi-merged.bin", "offset": "0x0" },
+                  { "name": "rgb-wifi", "file": "esp32c6-supermini-rgb-wifi-merged.bin", "offset": "0x0" },
+                  { "name": "device-config", "file": "device-config-default.bin", "offset": "0x3E0000" }
                 ]
               }
             ]
           }
-          EOF
+          MANIFEST
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -89,7 +104,7 @@ jobs:
           body: |
             ## UNAL Flash Tool — Zephyr Firmware ${{ github.ref_name }}
 
-            Firmware compilado con **Zephyr RTOS** para XIAO ESP32-C6.
+            Firmware compilado con **Zephyr RTOS** para ESP32-C6.
 
             ### ESP32-C6 XIAO (seeed_xiao_esp32c6)
 
@@ -97,20 +112,29 @@ jobs:
             - `esp32c6-xiao-zephyr-merged.bin` — **Binario único (bootloader + app)** — offset `0x0`
             - LED blink (GPIO 15) + heartbeat serial (115200 baud)
 
-            #### WiFi (con provisioning)
+            #### WiFi (con config partition)
             - `esp32c6-xiao-wifi-merged.bin` — **Binario único (bootloader + app)** — offset `0x0`
-            - Conexión WiFi STA con credenciales almacenadas en NVS
-            - Provisioning via protocolo serial PROV:* desde la web
+            - Conexión WiFi STA con credenciales desde config partition o NVS (fallback)
             - LED indica estado: rápido=sin credenciales, medio=conectando, lento=conectado
 
-            **Cómo flashear:**
-            1. Abre http://localhost:3000/flash
-            2. Selecciona este release → elige el firmware deseado
-            3. Conecta tu XIAO ESP32-C6 y flashea (offset automático `0x0`)
+            ### ESP32-C6 Super Mini
 
-            **Configurar WiFi (después de flashear wifi):**
-            1. Ve a http://localhost:3000/credentials
-            2. Ingresa SSID y password
-            3. Click "Write to Device (NVS)"
+            #### RGB WiFi (con config partition)
+            - `esp32c6-supermini-rgb-wifi-merged.bin` — **Binario único (bootloader + app)** — offset `0x0`
+            - `device-config-default.bin` — **Config por defecto (vacía)** — offset `0x3E0000`
+            - WiFi STA + LED RGB WS2812B configurable (solid, blink, breathe, rainbow, wifi_status)
+            - Config partition de 192 bytes: WiFi (0-127) + LED (128-191)
+
+            **Config partition layout (0x3E0000):**
+            | Offset | Tamaño | Contenido |
+            |--------|--------|-----------|
+            | 0x00   | 128 B  | WiFi config (magic `0x57494649`) |
+            | 0x80   | 64 B   | LED config (magic `0x4C454443`) |
+
+            **Cómo flashear:**
+            1. Abre la web → pestaña Flash
+            2. Selecciona este release → elige el firmware deseado
+            3. Configura WiFi y/o LED RGB en el paso de configuración
+            4. Conecta tu ESP32-C6 y flashea
           files: release-assets/*
           generate_release_notes: true
