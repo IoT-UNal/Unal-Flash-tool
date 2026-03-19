@@ -98,6 +98,24 @@ export class SerialManager {
 
   private handleUnexpectedDisconnect(): void {
     this.readLoopActive = false;
+
+    try {
+      if (this.reader) {
+        this.reader.cancel().catch(() => {});
+        this.reader.releaseLock();
+      }
+    } catch {
+      // Reader may already be released
+    }
+
+    try {
+      if (this.writer) {
+        this.writer.releaseLock();
+      }
+    } catch {
+      // Writer may already be released
+    }
+
     this.reader = null;
     this.writer = null;
     this._state = "disconnected";

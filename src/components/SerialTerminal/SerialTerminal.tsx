@@ -119,6 +119,18 @@ export default function SerialTerminal() {
     };
   }, []);
 
+  // Cleanup on unmount: close serial connection to release the port
+  useEffect(() => {
+    return () => {
+      const manager = SerialManager.getInstance();
+      if (manager.isConnected) {
+        manager.close().catch(() => {});
+      }
+      unsubsRef.current.forEach((u) => u());
+      unsubsRef.current = [];
+    };
+  }, []);
+
   const writeToTerminal = useCallback(
     (data: Uint8Array) => {
       const term = xtermRef.current;

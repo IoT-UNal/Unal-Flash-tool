@@ -17,6 +17,7 @@ export function useFlash() {
   const [progress, setProgress] = useState<FlashProgress | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<FlashError | null>(null);
 
   const addLog = useCallback((msg: string) => {
@@ -26,6 +27,17 @@ export function useFlash() {
   const connect = useCallback(
     async (port: SerialPort, autoBootMode = true) => {
       setError(null);
+      setIsConnecting(true);
+      // Disconnect any existing flash connection first
+      if (flashRef.current) {
+        try {
+          await flashRef.current.disconnect();
+        } catch {
+          /* ignore */
+        }
+        flashRef.current = null;
+        setIsConnected(false);
+      }
       try {
         flashRef.current = new FlashManager(addLog, setProgress);
         const info = await flashRef.current.connect(port, autoBootMode);
@@ -38,6 +50,8 @@ export function useFlash() {
         );
         setError(classified);
         throw err;
+      } finally {
+        setIsConnecting(false);
       }
     },
     [addLog]
@@ -105,6 +119,7 @@ export function useFlash() {
     progress,
     logs,
     isConnected,
+    isConnecting,
     error,
     connect,
     flash,

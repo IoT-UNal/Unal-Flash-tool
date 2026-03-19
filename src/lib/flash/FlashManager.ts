@@ -17,6 +17,7 @@ export class FlashManager {
   private transport: Transport | null = null;
   private loader: ESPLoader | null = null;
   private _chipInfo: ChipInfo | null = null;
+  private _port: SerialPort | null = null;
 
   private onLog: (msg: string) => void;
   private onProgress: (progress: FlashProgress) => void;
@@ -78,6 +79,8 @@ export class FlashManager {
 
   /** Connect to ESP chip via serial port and detect chip */
   async connect(port: SerialPort, autoBootMode = true): Promise<ChipInfo> {
+    this._port = port;
+
     this.onProgress({
       fileIndex: 0,
       totalFiles: 0,
@@ -382,7 +385,7 @@ export class FlashManager {
     await this.transport.setDTR(false);
   }
 
-  /** Disconnect from the device */
+  /** Disconnect from the device and release the serial port */
   async disconnect(): Promise<void> {
     try {
       if (this.transport) {
@@ -391,9 +394,20 @@ export class FlashManager {
     } catch {
       // Transport may already be closed
     }
+    // Ensure the underlying port is closed even if Transport failed
+    if (this._port) {
+      try {
+        if (this._port.readable || this._port.writable) {
+          await this._port.close();
+        }
+      } catch {
+        // Port may already be closed or detached (USB disconnect)
+      }
+    }
     this.transport = null;
     this.loader = null;
     this._chipInfo = null;
+    this._port = null;
   }
 
   /** Normalize chip family name from ESPLoader output */
