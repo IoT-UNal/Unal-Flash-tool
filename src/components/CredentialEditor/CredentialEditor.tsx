@@ -1,274 +1,166 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useSerial } from "@/hooks/useSerial";
-import { CredentialWriter } from "@/lib/credentials/CredentialWriter";
-
-interface CredentialField {
-  key: string;
-  label: string;
-  type: "text" | "password" | "textarea" | "file";
-  placeholder: string;
-  group: string;
-}
-
-const CREDENTIAL_FIELDS: CredentialField[] = [
-  // WiFi
-  { key: "wifi_ssid", label: "WiFi SSID", type: "text", placeholder: "MyNetwork", group: "WiFi" },
-  { key: "wifi_password", label: "WiFi Password", type: "password", placeholder: "••••••••", group: "WiFi" },
-  // MQTT
-  { key: "mqtt_broker", label: "Broker URL", type: "text", placeholder: "mqtt://broker.example.com:1883", group: "MQTT" },
-  { key: "mqtt_user", label: "Username", type: "text", placeholder: "mqtt_user", group: "MQTT" },
-  { key: "mqtt_password", label: "Password", type: "password", placeholder: "••••••••", group: "MQTT" },
-  { key: "mqtt_topic", label: "Base Topic", type: "text", placeholder: "devices/esp32", group: "MQTT" },
-  // API Keys
-  { key: "api_key", label: "API Key", type: "password", placeholder: "sk-...", group: "API Keys" },
-  { key: "api_endpoint", label: "API Endpoint", type: "text", placeholder: "https://api.example.com", group: "API Keys" },
-  // Device Identity
-  { key: "device_id", label: "Device ID", type: "text", placeholder: "esp32-001", group: "Device Identity" },
-  { key: "device_name", label: "Device Name", type: "text", placeholder: "Sensor Node 1", group: "Device Identity" },
-];
-
-const CERT_FIELDS = [
-  { key: "tls_ca_cert", label: "CA Certificate", group: "TLS Certificates" },
-  { key: "tls_client_cert", label: "Client Certificate", group: "TLS Certificates" },
-  { key: "tls_client_key", label: "Client Private Key", group: "TLS Certificates" },
-];
+import {
+  generateWifiConfigBlob,
+  WIFI_CONFIG_FLASH_OFFSET,
+} from "@/lib/config/WifiConfigGenerator";
 
 export default function CredentialEditor() {
-  const serial = useSerial();
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [certs, setCerts] = useState<Record<string, string>>({});
-  const [status, setStatus] = useState<"idle" | "writing" | "success" | "error">("idle");
+  const [ssid, setSsid] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [statusMsg, setStatusMsg] = useState("");
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    WiFi: true,
-  });
+  const [generatedBlob, setGeneratedBlob] = useState<Uint8Array | null>(null);
 
-  const handleChange = useCallback((key: string, value: string) => {
-    setValues((prev) => ({ ...prev, [key]: value }));
-  }, []);
-
-  const handleCertUpload = useCallback((key: string, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setCerts((prev) => ({ ...prev, [key]: reader.result as string }));
-    };
-    reader.readAsText(file);
-  }, []);
-
-  const toggleGroup = useCallback((group: string) => {
-    setExpandedGroups((prev) => ({ ...prev, [group]: !prev[group] }));
-  }, []);
-
-  const handleWrite = useCallback(async () => {
-    if (serial.state !== "connected") {
-      setStatus("error");
-      setStatusMsg("Device not connected. Connect via the Terminal or Flash page first.");
-      return;
-    }
-
-    setStatus("writing");
-    setStatusMsg("Writing credentials to device NVS...");
-
+  const handleGenerate = useCallback(() => {
     try {
-      const writer = new CredentialWriter();
-
-      // Filter non-empty credentials
-      const credentials: Record<string, string> = {};
-      for (const [key, value] of Object.entries(values)) {
-        if (value.trim()) credentials[key] = value.trim();
-      }
-
-      // Filter non-empty certs
-      const certificates: Record<string, string> = {};
-      for (const [key, value] of Object.entries(certs)) {
-        if (value.trim()) certificates[key] = value;
-      }
-
-      if (Object.keys(credentials).length === 0 && Object.keys(certificates).length === 0) {
-        setStatus("error");
-        setStatusMsg("No credentials to write. Fill in at least one field.");
-        return;
-      }
-
-      const result = await writer.writeAll(credentials, certificates);
-
-      if (result.success) {
-        setStatus("success");
-        setStatusMsg(`Successfully written ${Object.keys(credentials).length + Object.keys(certificates).length} credential(s) to device.`);
-      } else {
-        setStatus("error");
-        setStatusMsg(`Errors: ${result.errors.join(", ")}`);
-      }
+      const blob = generateWifiConfigBlob({ ssid, password });
+      setGeneratedBlob(blob);
+      setStatus("success");
+      setStatusMsg(
+        `Config binary generated (${blob.length} bytes). Flash it at offset 0x${WIFI_CONFIG_FLASH_OFFSET.toString(16).toUpperCase()} alongside your firmware.`
+      );
     } catch (err) {
       setStatus("error");
-      setStatusMsg(err instanceof Error ? err.message : "Failed to write credentials");
+      setStatusMsg(err instanceof Error ? err.message : "Failed to generate config");
+      setGeneratedBlob(null);
     }
-  }, [serial.state, values, certs]);
+  }, [ssid, password]);
 
-  const handleExportOverlay = useCallback(() => {
-    const lines: string[] = [
-      "# Zephyr Kconfig Overlay — Generated by UNAL Flash Tool",
-      `# ${new Date().toISOString()}`,
-      "",
-    ];
-
-    for (const [key, value] of Object.entries(values)) {
-      if (value.trim()) {
-        const kconfigKey = `CONFIG_${key.toUpperCase()}`;
-        lines.push(`${kconfigKey}="${value}"`);
-      }
-    }
-
-    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+  const handleDownload = useCallback(() => {
+    if (!generatedBlob) return;
+    const blob = new Blob([generatedBlob.buffer as ArrayBuffer], { type: "application/octet-stream" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "overlay.conf";
+    a.download = "wifi_config.bin";
     a.click();
     URL.revokeObjectURL(url);
-  }, [values]);
-
-  // Group fields
-  const groups = new Map<string, CredentialField[]>();
-  for (const field of CREDENTIAL_FIELDS) {
-    if (!groups.has(field.group)) groups.set(field.group, []);
-    groups.get(field.group)!.push(field);
-  }
+  }, [generatedBlob]);
 
   return (
     <div className="space-y-6">
-      {/* Status banner */}
+      {/* WiFi Config Card */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600/20">
+            <svg className="h-5 w-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.858 15.355-5.858 21.213 0" />
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-white">WiFi Configuration</h2>
+            <p className="text-sm text-gray-400">
+              Enter your WiFi credentials to generate a config binary
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm text-gray-400">WiFi SSID</label>
+            <input
+              type="text"
+              value={ssid}
+              onChange={(e) => setSsid(e.target.value)}
+              placeholder="MyNetwork"
+              maxLength={32}
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-blue-600 focus:outline-none"
+            />
+            <p className="mt-1 text-xs text-gray-600">{ssid.length}/32 characters</p>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm text-gray-400">WiFi Password</label>
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                maxLength={64}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 pr-10 text-sm text-gray-200 placeholder-gray-600 focus:border-blue-600 focus:outline-none"
+              />
+              <button
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-gray-300"
+                type="button"
+              >
+                {showPassword ? (
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                  </svg>
+                ) : (
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-gray-600">
+              {password.length}/64 characters (leave empty for open networks)
+            </p>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            onClick={handleGenerate}
+            disabled={!ssid.trim()}
+            className="rounded-lg bg-amber-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-amber-700 disabled:bg-gray-700 disabled:text-gray-500"
+          >
+            Generate Config Binary
+          </button>
+          {generatedBlob && (
+            <button
+              onClick={handleDownload}
+              className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-gray-300 transition-colors hover:bg-gray-700"
+            >
+              Download wifi_config.bin
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Status */}
       {status !== "idle" && (
         <div
-          className={`rounded-lg p-4 text-sm border ${
-            status === "writing"
-              ? "bg-blue-900/20 border-blue-800 text-blue-300"
-              : status === "success"
-                ? "bg-green-900/20 border-green-800 text-green-300"
-                : "bg-red-900/20 border-red-800 text-red-300"
+          className={`rounded-lg border p-4 text-sm ${
+            status === "success"
+              ? "border-green-800 bg-green-900/20 text-green-300"
+              : "border-red-800 bg-red-900/20 text-red-300"
           }`}
         >
           {statusMsg}
         </div>
       )}
 
-      {/* Credential Groups */}
-      {Array.from(groups.entries()).map(([group, fields]) => (
-        <div key={group} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-          <button
-            onClick={() => toggleGroup(group)}
-            className="w-full flex items-center justify-between p-4 hover:bg-gray-800/50 transition-colors"
-          >
-            <h3 className="text-white font-medium">{group}</h3>
-            <svg
-              className={`w-5 h-5 text-gray-500 transition-transform ${expandedGroups[group] ? "rotate-180" : ""}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-
-          {expandedGroups[group] && (
-            <div className="px-4 pb-4 space-y-3">
-              {fields.map((field) => (
-                <div key={field.key}>
-                  <label className="text-sm text-gray-400 block mb-1">{field.label}</label>
-                  <input
-                    type={field.type}
-                    placeholder={field.placeholder}
-                    value={values[field.key] || ""}
-                    onChange={(e) => handleChange(field.key, e.target.value)}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-200 text-sm placeholder-gray-600 focus:outline-none focus:border-blue-600"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
-
-      {/* Certificates */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-        <button
-          onClick={() => toggleGroup("TLS Certificates")}
-          className="w-full flex items-center justify-between p-4 hover:bg-gray-800/50 transition-colors"
-        >
-          <h3 className="text-white font-medium">TLS Certificates</h3>
-          <svg
-            className={`w-5 h-5 text-gray-500 transition-transform ${expandedGroups["TLS Certificates"] ? "rotate-180" : ""}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        {expandedGroups["TLS Certificates"] && (
-          <div className="px-4 pb-4 space-y-3">
-            {CERT_FIELDS.map((field) => (
-              <div key={field.key}>
-                <label className="text-sm text-gray-400 block mb-1">{field.label}</label>
-                <div className="flex items-center gap-2">
-                  <label className="flex-1 relative">
-                    <div className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-400 cursor-pointer hover:bg-gray-750">
-                      {certs[field.key] ? "✓ File loaded" : "Choose .pem file..."}
-                    </div>
-                    <input
-                      type="file"
-                      accept=".pem,.crt,.key"
-                      onChange={(e) => handleCertUpload(field.key, e)}
-                      className="hidden"
-                    />
-                  </label>
-                  {certs[field.key] && (
-                    <button
-                      onClick={() =>
-                        setCerts((prev) => {
-                          const next = { ...prev };
-                          delete next[field.key];
-                          return next;
-                        })
-                      }
-                      className="p-2 text-gray-500 hover:text-red-400"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+      {/* How it works */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">
+        <h3 className="mb-3 text-sm font-medium text-white">How it works</h3>
+        <ol className="space-y-2 text-sm text-gray-400">
+          <li className="flex items-start gap-2">
+            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-blue-600/20 text-xs text-blue-400">1</span>
+            Enter your WiFi SSID and password above
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-blue-600/20 text-xs text-blue-400">2</span>
+            Click &quot;Generate Config Binary&quot; — creates a 128-byte config blob
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-blue-600/20 text-xs text-blue-400">3</span>
+            In the Flash Wizard, enable &quot;WiFi firmware&quot; and the config will be flashed at offset 0x{WIFI_CONFIG_FLASH_OFFSET.toString(16).toUpperCase()} alongside your firmware
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-blue-600/20 text-xs text-blue-400">4</span>
+            The firmware reads the config on boot — no serial provisioning needed
+          </li>
+        </ol>
       </div>
-
-      {/* Actions */}
-      <div className="flex gap-3 flex-wrap">
-        <button
-          onClick={handleWrite}
-          disabled={status === "writing" || serial.state !== "connected"}
-          className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg text-sm font-medium transition-colors"
-        >
-          {status === "writing" ? "Writing..." : "Write to Device (NVS)"}
-        </button>
-        <button
-          onClick={handleExportOverlay}
-          className="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-sm border border-gray-700 transition-colors"
-        >
-          Export overlay.conf
-        </button>
-      </div>
-
-      <p className="text-xs text-gray-600">
-        NVS: Writes credentials at runtime via PROV:* serial protocol. overlay.conf: Generates a Kconfig
-        overlay for build-time injection.
-      </p>
     </div>
   );
 }

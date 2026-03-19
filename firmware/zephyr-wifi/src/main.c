@@ -1,11 +1,11 @@
 /*
  * UNAL Flash Tool — WiFi Firmware (Zephyr RTOS)
  *
- * Reads WiFi credentials from NVS, connects to the configured AP,
- * and prints connection status via UART.
+ * Reads WiFi credentials from a flash config partition,
+ * falls back to NVS, then connects to the configured AP.
  *
- * Credentials are provisioned via the PROV:* serial protocol
- * from the UNAL Flash Tool web interface.
+ * Credentials are provided by flashing a config binary
+ * from the UNAL Flash Tool web interface at offset 0x3E0000.
  *
  * Target: Seeed XIAO ESP32-C6
  */
@@ -16,8 +16,8 @@
 #include <zephyr/logging/log.h>
 #include <version.h>
 
+#include "wifi_config.h"
 #include "wifi_mgr.h"
-#include "prov_shell.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -57,27 +57,33 @@ int main(void)
 		return -1;
 	}
 
-	/* Initialize provisioning shell commands */
-	prov_shell_init();
-
-	/* Initialize WiFi manager and attempt connection from NVS */
+	/* Initialize WiFi manager (NVS + event callbacks) */
 	ret = wifi_mgr_init();
 	if (ret < 0) {
 		LOG_ERR("WiFi manager init failed (%d)", ret);
 	}
 
-	/* Try loading credentials from NVS and connecting */
+	/* Try loading credentials: config partition first, then NVS */
 	char ssid[33] = {0};
 	char psk[65] = {0};
+	bool creds_found = false;
 
-	if (wifi_mgr_load_credentials(ssid, sizeof(ssid), psk, sizeof(psk)) == 0 &&
+	if (wifi_config_load(ssid, sizeof(ssid), psk, sizeof(psk)) == 0 &&
 	    ssid[0] != '\0') {
-		LOG_INF("Credentials found in NVS — SSID: %s", ssid);
+		LOG_INF("Credentials from config partition — SSID: %s", ssid);
+		creds_found = true;
+	} else if (wifi_mgr_load_credentials(ssid, sizeof(ssid),
+					    psk, sizeof(psk)) == 0 &&
+		   ssid[0] != '\0') {
+		LOG_INF("Credentials from NVS — SSID: %s", ssid);
+		creds_found = true;
+	}
+
+	if (creds_found) {
 		wifi_mgr_connect(ssid, psk);
 	} else {
-		LOG_WRN("No WiFi credentials in NVS");
-		LOG_INF("Use PROV:SET:wifi_ssid=<ssid> and PROV:SET:wifi_pass=<password>");
-		LOG_INF("Then PROV:COMMIT to save and connect");
+		LOG_WRN("No WiFi credentials found");
+		LOG_INF("Use the UNAL Flash Tool to flash a config binary");
 	}
 
 	/* Main loop — blink LED based on WiFi state */

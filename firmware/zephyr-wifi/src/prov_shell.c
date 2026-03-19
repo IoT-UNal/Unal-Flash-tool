@@ -4,6 +4,9 @@
  * Handles the PROV:* serial protocol sent by the UNAL Flash Tool
  * CredentialWriter (browser side).
  *
+ * Uses polling-based RX in a dedicated thread for maximum
+ * compatibility with all UART backends including USB Serial/JTAG.
+ *
  * Protocol:
  *   PROV:START\n       → Enter provisioning mode
  *   PROV:SET:key=val\n → Set credential in NVS
@@ -27,19 +30,25 @@
 
 LOG_MODULE_REGISTER(prov_shell, LOG_LEVEL_INF);
 
-#define PROV_BUF_SIZE 256
+#define PROV_BUF_SIZE    256
+#define PROV_STACK_SIZE  2048
+#define PROV_POLL_MS     10    /* polling interval */
 
 /* Provisioning state */
 static bool prov_active;
 static char prov_ssid[33];
 static char prov_psk[65];
 
-/* UART RX buffer */
+/* RX line buffer */
 static char rx_buf[PROV_BUF_SIZE];
 static int rx_pos;
 
-/* UART device */
+/* UART device — USB Serial/JTAG on ESP32-C6 */
 static const struct device *uart_dev;
+
+/* Polling thread stack */
+K_THREAD_STACK_DEFINE(prov_stack, PROV_STACK_SIZE);
+static struct k_thread prov_thread_data;
 
 static void send_response(const char *resp)
 {
@@ -179,30 +188,36 @@ static void process_line(const char *line)
 	/* Ignore non-PROV lines silently */
 }
 
-static void uart_isr(const struct device *dev, void *user_data)
+/**
+ * Polling thread — reads from USB Serial/JTAG using uart_poll_in().
+ * This works reliably with the espressif,esp32-usb-serial driver
+ * which may not fully support IRQ-driven RX.
+ */
+static void prov_poll_thread(void *p1, void *p2, void *p3)
 {
-	ARG_UNUSED(user_data);
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
 
-	if (!uart_irq_update(dev)) {
-		return;
-	}
+	unsigned char c;
 
-	while (uart_irq_rx_ready(dev)) {
-		uint8_t c;
-		int ret = uart_fifo_read(dev, &c, 1);
-		if (ret <= 0) {
-			break;
-		}
+	LOG_INF("Provisioning poll thread started");
 
-		if (c == '\n' || c == '\r') {
-			if (rx_pos > 0) {
-				rx_buf[rx_pos] = '\0';
-				process_line(rx_buf);
-				rx_pos = 0;
+	while (1) {
+		/* Non-blocking read: returns 0 on success, -1 if no data */
+		while (uart_poll_in(uart_dev, &c) == 0) {
+			if (c == '\n' || c == '\r') {
+				if (rx_pos > 0) {
+					rx_buf[rx_pos] = '\0';
+					process_line(rx_buf);
+					rx_pos = 0;
+				}
+			} else if (rx_pos < PROV_BUF_SIZE - 1) {
+				rx_buf[rx_pos++] = (char)c;
 			}
-		} else if (rx_pos < PROV_BUF_SIZE - 1) {
-			rx_buf[rx_pos++] = (char)c;
 		}
+
+		k_sleep(K_MSEC(PROV_POLL_MS));
 	}
 }
 
@@ -215,11 +230,14 @@ void prov_shell_init(void)
 		return;
 	}
 
-	/* Set up interrupt-driven RX */
-	uart_irq_callback_set(uart_dev, uart_isr);
-	uart_irq_rx_enable(uart_dev);
-
 	rx_pos = 0;
 
-	LOG_INF("Provisioning shell initialized (PROV:* protocol)");
+	/* Start polling thread */
+	k_thread_create(&prov_thread_data, prov_stack,
+			K_THREAD_STACK_SIZEOF(prov_stack),
+			prov_poll_thread, NULL, NULL, NULL,
+			7, 0, K_NO_WAIT);
+	k_thread_name_set(&prov_thread_data, "prov_poll");
+
+	LOG_INF("Provisioning shell initialized (polling mode)");
 }

@@ -6,5 +6,5 @@ project(unal_wifi)
 target_sources(app PRIVATE
   src/main.c
   src/wifi_mgr.c
-  src/prov_shell.c
+  src/wifi_config.c
 )
