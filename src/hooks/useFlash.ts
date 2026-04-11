@@ -111,6 +111,11 @@ export function useFlash() {
     flashRef.current = null;
   }, []);
 
+  const hardReset = useCallback(async () => {
+    if (!flashRef.current) throw new Error("Not connected");
+    await flashRef.current.hardReset();
+  }, []);
+
   const clearLogs = useCallback(() => setLogs([]), []);
   const clearError = useCallback(() => setError(null), []);
 
@@ -127,6 +132,7 @@ export function useFlash() {
     buildSegments,
     getBootloaderOffset,
     disconnect,
+    hardReset,
     clearLogs,
     clearError,
   };

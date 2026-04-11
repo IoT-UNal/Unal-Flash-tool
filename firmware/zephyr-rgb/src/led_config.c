@@ -1,8 +1,7 @@
 /*
  * LED Config — flash partition reader
  *
- * Reads led_config from offset 128 in the scratch partition,
- * immediately after the 128-byte WiFi config block.
+ * Reads led_config from offset 128 in the scratch partition.
  */
 
 #include <zephyr/kernel.h>
@@ -14,7 +13,7 @@
 
 LOG_MODULE_REGISTER(led_config, LOG_LEVEL_INF);
 
-/* LED config lives right after the 128-byte WiFi config in scratch */
+/* LED config at offset 128 in the scratch partition */
 #define LED_CONFIG_FLASH_OFFSET 128
 
 int led_config_load(struct led_config *cfg)
@@ -59,8 +58,8 @@ void led_config_defaults(struct led_config *cfg)
 	memset(cfg, 0xff, sizeof(*cfg));
 	cfg->magic      = LED_CONFIG_MAGIC;
 	cfg->version    = LED_CONFIG_VERSION;
-	cfg->mode       = LED_MODE_WIFI_STATUS;
-	cfg->brightness = 40;   /* ~15 % — avoids blinding in dark rooms */
+	cfg->mode       = LED_MODE_SOLID;
+	cfg->brightness = 128;  /* ~50 % — visible but not blinding */
 	cfg->speed      = 128;  /* medium */
 	cfg->color_r    = 0;
 	cfg->color_g    = 120;

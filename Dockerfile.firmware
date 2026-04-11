@@ -1,0 +1,49 @@
+# Dockerfile.firmware — Zephyr RTOS build environment for AMI LwM2M Node
+# Usage: docker compose run --rm firmware-builder [overlay.conf] [output-dir]
+
+FROM python:3.11-slim AS base
+
+# System dependencies for Zephyr SDK
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git cmake ninja-build gperf ccache dfu-util device-tree-compiler wget \
+    xz-utils file make gcc gcc-multilib g++-multilib libsdl2-dev \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install west
+RUN pip install --no-cache-dir west
+
+# Initialize Zephyr workspace (v4.3.0 includes ieee802.15.4 driver for ESP32-C6)
+# Upstream Zephyr v4.1.0 lacked ESP32 802.15.4 radio support needed for OpenThread
+WORKDIR /zephyrproject
+RUN west init --mr v4.3.0 . && \
+    west update --narrow -o=--depth=1
+
+# Install Zephyr python dependencies
+RUN pip install --no-cache-dir -r /zephyrproject/zephyr/scripts/requirements.txt
+
+# Install esptool (required by Zephyr 4.3.0 ESP32 SoC support)
+RUN pip install --no-cache-dir "esptool>=5.0.2"
+
+# Fetch Espressif binary blobs (WiFi/BLE libs needed for linking)
+RUN west blobs fetch hal_espressif
+
+# Install Zephyr SDK (RISC-V toolchain for ESP32-C6)
+RUN west sdk install -t riscv64-zephyr-elf
+
+ENV ZEPHYR_BASE=/zephyrproject/zephyr
+
+# Setup ccache for faster rebuilds
+ENV CCACHE_DIR=/workspace/ccache
+ENV USE_CCACHE=1
+
+# Copy firmware source
+COPY firmware/ami-lwm2m-node /workspace/firmware/ami-lwm2m-node
+
+# Copy build script
+COPY scripts/build-ami-firmware.sh /workspace/build-ami-firmware.sh
+RUN chmod +x /workspace/build-ami-firmware.sh
+
+WORKDIR /workspace
+
+ENTRYPOINT ["/workspace/build-ami-firmware.sh"]
