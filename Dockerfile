@@ -30,12 +30,8 @@ RUN addgroup nextjs docker 2>/dev/null; addgroup nextjs ping 2>/dev/null; true
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Pre-built firmware binaries (served by /api/local-firmware/*)
-COPY --from=builder --chown=nextjs:nodejs \
-  /app/firmware/zephyr-rgb/build/zephyr/zephyr.bin \
-  ./firmware/zephyr-rgb/build/zephyr/zephyr.bin
-
-# ami-lwm2m-node firmware placeholder (upload via wizard or mount volume)
+# Pre-built firmware directories (binaries are built at runtime or uploaded via wizard)
+RUN mkdir -p ./firmware/zephyr-rgb/build/zephyr && chown -R nextjs:nodejs ./firmware/zephyr-rgb
 RUN mkdir -p ./firmware/ami-lwm2m-node/build/zephyr && chown -R nextjs:nodejs ./firmware/ami-lwm2m-node
 
 # Overlay directory for build configs (volume mount point)
