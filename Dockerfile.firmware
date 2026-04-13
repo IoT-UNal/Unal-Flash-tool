@@ -40,9 +40,9 @@ ENV USE_CCACHE=1
 # Copy firmware source
 COPY firmware/ami-lwm2m-node /workspace/firmware/ami-lwm2m-node
 
-# Copy build script
+# Copy build script (ensure LF line endings for Linux exec)
 COPY scripts/build-ami-firmware.sh /workspace/build-ami-firmware.sh
-RUN chmod +x /workspace/build-ami-firmware.sh
+RUN sed -i 's/\r$//' /workspace/build-ami-firmware.sh && chmod +x /workspace/build-ami-firmware.sh
 
 WORKDIR /workspace
 
