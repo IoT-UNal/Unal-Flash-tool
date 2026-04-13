@@ -6,6 +6,7 @@ import {
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPO = process.env.GITHUB_REPO;
+const GITHUB_REF = process.env.GITHUB_REF || "main";
 const WORKFLOW_FILE = "build-firmware.yml";
 
 /**
@@ -46,7 +47,7 @@ export async function POST(request: NextRequest) {
         method: "POST",
         headers: ghHeaders,
         body: JSON.stringify({
-          ref: "main",
+          ref: GITHUB_REF,
           inputs: {
             build_ami_only: "true",
             thread_channel: String(config.threadChannel),

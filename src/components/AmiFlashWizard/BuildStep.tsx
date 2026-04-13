@@ -8,7 +8,11 @@ interface PreflightStatus {
     ready: boolean;
     hasToken: boolean;
     hasRepo: boolean;
+    hasRef: boolean;
     repo: string | null;
+    ref: string | null;
+    tokenValid: boolean | null;
+    tokenError: string | null;
     setupUrl: string;
   };
   docker: {
@@ -234,8 +238,8 @@ export default function BuildStep({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {/* CI status */}
             <div className={`flex items-center gap-2 text-xs p-2 rounded ${ciReady ? "bg-green-900/20 text-green-400" : "bg-yellow-900/20 text-yellow-400"}`}>
-              <span>{ciReady ? "✅" : "⚠️"}</span>
-              <span>CI/CD: {ciReady ? "Ready" : "Needs setup"}</span>
+              <span>{ciReady ? "✅" : preflight.ci.tokenValid === false ? "❌" : "⚠️"}</span>
+              <span>CI/CD: {ciReady ? "Ready" : preflight.ci.tokenError ? "Token error" : "Needs setup"}</span>
               {!ciReady && (
                 <button
                   onClick={() => setShowCISetup(!showCISetup)}
@@ -428,12 +432,26 @@ export default function BuildStep({
         {/* Setup required warning */}
         {!methodReady && !isBuilding && buildMethod === "ci" && !showCISetup && (
           <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-700/30 rounded-lg text-sm text-yellow-400">
-            <p>⚠️ GitHub Actions requires a Personal Access Token.</p>
+            {preflight?.ci.tokenError ? (
+              <>
+                <p>❌ {preflight.ci.tokenError}</p>
+                <a
+                  href="https://github.com/settings/tokens?type=beta"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 inline-block text-xs text-blue-400 hover:text-blue-300 underline"
+                >
+                  Go to GitHub Token Settings →
+                </a>
+              </>
+            ) : (
+              <p>⚠️ GitHub Actions requires a Personal Access Token.</p>
+            )}
             <button
               onClick={() => setShowCISetup(true)}
-              className="mt-1 text-xs text-blue-400 hover:text-blue-300 underline"
+              className="mt-1 block text-xs text-blue-400 hover:text-blue-300 underline"
             >
-              Configure now →
+              {preflight?.ci.hasToken ? "Update configuration →" : "Configure now →"}
             </button>
           </div>
         )}

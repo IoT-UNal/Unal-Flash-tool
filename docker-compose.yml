@@ -4,6 +4,9 @@ services:
     image: unal-flash-tool-web:latest
     ports:
       - "${PORT:-3000}:3000"
+    env_file:
+      - path: .env
+        required: false
     environment:
       - NODE_ENV=production
     user: "0:0"
@@ -11,6 +14,7 @@ services:
       - firmware-output:/app/firmware/ami-lwm2m-node/build/zephyr
       - firmware-overlays:/app/tmp/overlays
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./.env:/app/.env:rw
     restart: unless-stopped
 
   firmware-builder:

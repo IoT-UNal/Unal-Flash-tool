@@ -11,7 +11,7 @@ const ENV_PATH = path.join(process.cwd(), ".env");
  * Creates the file if it doesn't exist, updates values if it does.
  */
 export async function POST(request: NextRequest) {
-  const { githubToken, githubRepo } = await request.json();
+  const { githubToken, githubRepo, githubRef } = await request.json();
 
   if (!githubToken || !githubRepo) {
     return NextResponse.json(
@@ -59,6 +59,14 @@ export async function POST(request: NextRequest) {
       content = content.replace(/GITHUB_REPO=.*/g, `GITHUB_REPO=${githubRepo}`);
     } else {
       content += `\n# GitHub repository (owner/repo)\nGITHUB_REPO=${githubRepo}\n`;
+    }
+
+    // Update or add GITHUB_REF (branch for workflow_dispatch)
+    const ref = githubRef || "main";
+    if (content.includes("GITHUB_REF=")) {
+      content = content.replace(/GITHUB_REF=.*/g, `GITHUB_REF=${ref}`);
+    } else {
+      content += `\n# Branch to dispatch workflows on\nGITHUB_REF=${ref}\n`;
     }
 
     await writeFile(ENV_PATH, content.trim() + "\n");
