@@ -5,6 +5,7 @@ import path from "path";
 import {
   generateOverlayConf,
   validateAmiConfig,
+  resolveZephyrBoard,
 } from "@/lib/config/AmiOverlayGenerator";
 import type { AmiConfig } from "@/lib/config/AmiOverlayGenerator";
 
@@ -61,13 +62,14 @@ export async function POST(request: NextRequest) {
         // Run firmware builder container directly (image must be pre-built)
         const overlayContainer = `/workspace/overlays/${buildId}.conf`;
         const projectName = process.env.COMPOSE_PROJECT_NAME || "unal-flash-tool";
+        const zephyrBoard = resolveZephyrBoard(config.boardTarget);
         const cmd = [
           "docker", "run", "--rm",
           "-v", `${projectName}_firmware-overlays:/workspace/overlays`,
           "-v", `${projectName}_firmware-output:/output`,
           "-v", `${projectName}_ccache:/workspace/ccache`,
           "unal-firmware-builder:latest",
-          overlayContainer, "/output",
+          overlayContainer, "/output", zephyrBoard,
         ].join(" ");
 
         await new Promise<void>((resolve, reject) => {

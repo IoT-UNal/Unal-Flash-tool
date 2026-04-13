@@ -55,12 +55,22 @@ on:
         type: boolean
         default: true
 
+      # --- Board ---
+      board_target:
+        description: "Zephyr board target"
+        type: choice
+        options:
+          - "xiao_esp32c6/esp32c6/hpcore"
+          - "weact_esp32c6_mini/esp32c6/hpcore"
+          - "esp32c6_devkitc/esp32c6/hpcore"
+        default: "xiao_esp32c6/esp32c6/hpcore"
+
 permissions:
   contents: write
 
 env:
   ZEPHYR_VERSION: "v4.3.0"
-  BOARD: "xiao_esp32c6/esp32c6/hpcore"
+  BOARD: ${{ github.event.inputs.board_target || 'xiao_esp32c6/esp32c6/hpcore' }}
 
 jobs:
   build:

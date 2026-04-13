@@ -1,5 +1,5 @@
 import type { AmiConfig } from "@/lib/config/AmiOverlayGenerator";
-import { generateOverlayConf } from "@/lib/config/AmiOverlayGenerator";
+import { generateOverlayConf, SUPPORTED_BOARDS } from "@/lib/config/AmiOverlayGenerator";
 
 interface MeterConfigStepProps {
   config: AmiConfig;
@@ -15,9 +15,47 @@ export default function MeterConfigStep({
   onBack,
 }: MeterConfigStepProps) {
   const overlay = generateOverlayConf(config);
+  const selectedBoard = SUPPORTED_BOARDS.find((b) => b.id === config.boardTarget);
 
   return (
     <div className="space-y-5">
+      {/* Board Target Selection */}
+      <div className="bg-gray-800 rounded-lg p-5 border border-gray-700">
+        <h3 className="text-base font-semibold text-amber-400 mb-1">Board Target</h3>
+        <p className="text-xs text-gray-500 mb-4">
+          Select the ESP32-C6 board variant you&apos;re flashing. The firmware binary is
+          board-specific due to different pin mappings and peripherals.
+        </p>
+
+        <div className="space-y-2">
+          {SUPPORTED_BOARDS.map((board) => (
+            <label
+              key={board.id}
+              className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                config.boardTarget === board.id
+                  ? "bg-amber-900/30 border border-amber-600/50"
+                  : "bg-gray-900/50 border border-transparent hover:border-gray-600"
+              }`}
+            >
+              <input
+                type="radio"
+                name="boardTarget"
+                value={board.id}
+                checked={config.boardTarget === board.id}
+                onChange={() => onChange({ boardTarget: board.id })}
+                className="mt-1 accent-amber-500"
+              />
+              <div>
+                <p className="text-sm text-gray-200 font-medium">{board.label}</p>
+                <p className="text-xs text-gray-500">{board.description}</p>
+                <p className="text-xs text-gray-600 font-mono mt-0.5">{board.zephyrTarget}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Meter Configuration */}
       <div className="bg-gray-800 rounded-lg p-5 border border-gray-700">
         <h3 className="text-base font-semibold text-amber-400 mb-1">Meter Configuration</h3>
         <p className="text-xs text-gray-500 mb-4">
@@ -70,8 +108,17 @@ export default function MeterConfigStep({
         </div>
       </div>
 
-      {/* Overlay Preview */}
+      {/* Build Summary */}
       <div className="bg-gray-800 rounded-lg p-5 border border-gray-700">
+        <h4 className="text-sm font-medium text-gray-300 mb-2">
+          Build Summary
+        </h4>
+        <div className="text-xs text-gray-400 space-y-1 mb-3">
+          <p>🎯 <span className="text-gray-300">{selectedBoard?.label}</span> <span className="text-gray-600 font-mono">({selectedBoard?.zephyrTarget})</span></p>
+          <p>⚡ {config.singlePhase ? "Single-phase" : "Three-phase"} meter</p>
+          <p>🔬 {config.demoMode ? "Demo mode (synthetic data)" : "Production (real DLMS meter)"}</p>
+        </div>
+
         <h4 className="text-sm font-medium text-gray-300 mb-2">
           Configuration Preview <span className="text-gray-500">(prj.conf overlay)</span>
         </h4>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   validateAmiConfig,
+  resolveZephyrBoard,
   type AmiConfig,
 } from "@/lib/config/AmiOverlayGenerator";
 
@@ -50,6 +51,7 @@ export async function POST(request: NextRequest) {
           ref: GITHUB_REF,
           inputs: {
             build_ami_only: "true",
+            board_target: resolveZephyrBoard(config.boardTarget),
             thread_channel: String(config.threadChannel),
             thread_pan_id: String(config.threadPanId),
             thread_network_key: config.threadNetworkKey,

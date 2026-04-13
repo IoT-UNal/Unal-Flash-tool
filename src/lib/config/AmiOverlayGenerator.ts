@@ -15,6 +15,9 @@
 // ---------------------------------------------------------------------------
 
 export interface AmiConfig {
+  // Board target
+  boardTarget: string; // Zephyr board qualified name
+
   // Thread network
   threadChannel: number; // 11-26, default 25
   threadPanId: number; // decimal (e.g. 9197 = 0x23ED)
@@ -32,10 +35,44 @@ export interface AmiConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Supported board targets
+// ---------------------------------------------------------------------------
+
+export interface BoardTarget {
+  id: string;
+  label: string;
+  zephyrTarget: string;
+  description: string;
+}
+
+export const SUPPORTED_BOARDS: BoardTarget[] = [
+  {
+    id: "xiao_esp32c6",
+    label: "Seeed XIAO ESP32-C6",
+    zephyrTarget: "xiao_esp32c6/esp32c6/hpcore",
+    description: "Seeed Studio XIAO — compact, USB-C, built-in antenna",
+  },
+  {
+    id: "esp32c6_supermini",
+    label: "ESP32-C6 Super Mini",
+    zephyrTarget: "weact_esp32c6_mini/esp32c6/hpcore",
+    description: "WeAct Studio ESP32-C6 Mini — ultra-compact, low-cost",
+  },
+  {
+    id: "esp32c6_devkitc",
+    label: "ESP32-C6-DevKitC (WROOM)",
+    zephyrTarget: "esp32c6_devkitc/esp32c6/hpcore",
+    description: "Espressif DevKitC — reference board, WROOM module",
+  },
+];
+
+// ---------------------------------------------------------------------------
 // Defaults (matching firmware/ami-lwm2m-node/prj.conf)
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_AMI_CONFIG: AmiConfig = {
+  boardTarget: "xiao_esp32c6",
+
   threadChannel: 25,
   threadPanId: 9197,
   threadNetworkKey: "5e:de:be:ad:64:40:5b:3e:17:19:36:46:c2:94:22:85",
@@ -64,6 +101,12 @@ export function ipv4ToNat64(ipv4: string): string | null {
   return `64:ff9b::${hex1}:${hex2}`;
 }
 
+/** Resolve a board ID to its Zephyr qualified board target */
+export function resolveZephyrBoard(boardId: string): string {
+  const board = SUPPORTED_BOARDS.find((b) => b.id === boardId);
+  return board?.zephyrTarget ?? SUPPORTED_BOARDS[0].zephyrTarget;
+}
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -77,6 +120,11 @@ export function validateAmiConfig(
   config: AmiConfig
 ): Record<string, string> {
   const errors: Record<string, string> = {};
+
+  // Board target
+  if (!SUPPORTED_BOARDS.find((b) => b.id === config.boardTarget)) {
+    errors.boardTarget = "Unknown board target";
+  }
 
   // Thread channel
   if (config.threadChannel < 11 || config.threadChannel > 26) {
