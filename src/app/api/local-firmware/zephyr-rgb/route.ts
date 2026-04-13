@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import path from "path";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/local-firmware/zephyr-rgb
  * Serves the locally-built zephyr-rgb binary from the firmware build output.

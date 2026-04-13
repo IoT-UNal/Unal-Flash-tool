@@ -97,16 +97,26 @@ export default function BuildStep({
     }
   };
 
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
   const handleDownloadBuilt = async () => {
     if (!build.downloadUrl) return;
+    setDownloading(true);
+    setDownloadError(null);
     try {
       const resp = await fetch(build.downloadUrl);
-      if (!resp.ok) throw new Error("Failed to download firmware");
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
       const buf = await resp.arrayBuffer();
+      if (buf.byteLength === 0) throw new Error("Empty firmware file");
       const source = build.method === "ci" ? "GitHub Actions CI/CD" : "Docker build";
       onFirmwareLoaded(new Uint8Array(buf), source);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setDownloadError(`Failed to load firmware: ${msg}`);
       console.error("Download error:", err);
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -197,14 +207,14 @@ export default function BuildStep({
     setDockerBuilding(false);
   };
 
-  // Auto-load firmware when CI build completes
+  // Auto-load firmware when build completes (both CI and Docker)
   useEffect(() => {
     if (
       build.phase === "done" &&
-      build.method === "ci" &&
       build.binarySize &&
       build.downloadUrl &&
-      !firmwareData
+      !firmwareData &&
+      !downloading
     ) {
       handleDownloadBuilt();
     }
@@ -600,12 +610,24 @@ export default function BuildStep({
 
         {/* Download built binary */}
         {isDone && build.downloadUrl && !firmwareData && (
-          <button
-            onClick={handleDownloadBuilt}
-            className="w-full mt-3 py-2 bg-green-700 hover:bg-green-600 text-white text-sm rounded-lg transition-colors"
-          >
-            Load Built Firmware
-          </button>
+          <>
+            <button
+              onClick={handleDownloadBuilt}
+              disabled={downloading}
+              className={`w-full mt-3 py-2 text-white text-sm rounded-lg transition-colors ${
+                downloading
+                  ? "bg-green-800 cursor-wait"
+                  : "bg-green-700 hover:bg-green-600"
+              }`}
+            >
+              {downloading ? "Loading firmware…" : "Load Built Firmware"}
+            </button>
+            {downloadError && (
+              <div className="mt-2 p-3 bg-red-900/20 border border-red-700/30 rounded text-sm text-red-400">
+                {downloadError}
+              </div>
+            )}
+          </>
         )}
       </div>
 
