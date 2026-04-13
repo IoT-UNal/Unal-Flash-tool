@@ -1,3 +1,5 @@
+name: unal-flash-tool
+
 services:
   web:
     build: .
