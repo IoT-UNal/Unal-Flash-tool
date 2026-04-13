@@ -22,7 +22,14 @@ if [ -n "$OVERLAY_FILE" ] && [ -f "$OVERLAY_FILE" ]; then
     cat "$OVERLAY_FILE"
     echo ""
     echo "[build] --- End overlay ---"
-    EXTRA_CONF="-DEXTRA_CONF_FILE=$OVERLAY_FILE"
+    # Only pass .conf files as EXTRA_CONF_FILE; DTS overlays are auto-detected
+    # from the boards/ directory by Zephyr's build system.
+    if echo "$OVERLAY_FILE" | grep -qE '\.conf$'; then
+        EXTRA_CONF="-DEXTRA_CONF_FILE=$OVERLAY_FILE"
+    else
+        echo "[build] (DTS overlay — will be auto-detected, not passed as EXTRA_CONF_FILE)"
+        EXTRA_CONF=""
+    fi
 else
     echo "[build] No overlay file — using default prj.conf"
     EXTRA_CONF=""
@@ -64,9 +71,9 @@ echo "[build] Patching OpenThread includes for Zephyr 4.1.0..."
 find "$SOURCE_DIR/src" -name '*.c' -o -name '*.h' | xargs sed -i \
     's|#include <openthread\.h>|#include <zephyr/net/openthread.h>|g'
 
-# Clean previous build
+# Clean previous build (rm contents, not the mount point itself)
 echo "[build] Cleaning previous build..."
-rm -rf /workspace/build
+rm -rf /workspace/build/* 2>/dev/null || true
 
 # Build firmware
 echo "[build] Starting west build for $BOARD_TARGET..."
