@@ -36,13 +36,27 @@ sed -i \
     -e '/^CONFIG_LWM2M_MAX_NOTIFIED_NUMERICAL_RES_TRACKED=/d' \
     "$SOURCE_DIR/prj.conf"
 
-# Fix DTS overlay filename for Zephyr 4.1+ qualified board names
-# Only applies to xiao_esp32c6 which ships with old-style naming
-DTS_OVERLAY="$SOURCE_DIR/boards/xiao_esp32c6_hpcore.overlay"
-DTS_TARGET="$SOURCE_DIR/boards/xiao_esp32c6_esp32c6_hpcore.overlay"
-if [ -f "$DTS_OVERLAY" ]; then
-    echo "[build] Renaming board overlay: xiao_esp32c6_hpcore.overlay -> xiao_esp32c6_esp32c6_hpcore.overlay"
-    mv "$DTS_OVERLAY" "$DTS_TARGET"
+# Fix DTS overlay filenames for Zephyr 4.1+ qualified board names
+# Zephyr 4.x expects <board>_<soc>_<variant>.overlay (e.g. xiao_esp32c6_esp32c6_hpcore.overlay)
+# Older overlays may use <board>_<variant>.overlay (e.g. xiao_esp32c6_hpcore.overlay)
+BOARD_UNDERSCORED=$(echo "$BOARD_TARGET" | tr '/' '_')
+EXPECTED_DTS="$SOURCE_DIR/boards/${BOARD_UNDERSCORED}.overlay"
+
+if [ ! -f "$EXPECTED_DTS" ]; then
+    # Try old-style naming: strip the SoC qualifier (middle segment)
+    BOARD_NAME=$(echo "$BOARD_TARGET" | cut -d'/' -f1)
+    VARIANT=$(echo "$BOARD_TARGET" | cut -d'/' -f3)
+    OLD_STYLE_DTS="$SOURCE_DIR/boards/${BOARD_NAME}_${VARIANT}.overlay"
+    if [ -f "$OLD_STYLE_DTS" ]; then
+        echo "[build] Renaming board overlay: $(basename $OLD_STYLE_DTS) -> $(basename $EXPECTED_DTS)"
+        cp "$OLD_STYLE_DTS" "$EXPECTED_DTS"
+    else
+        echo "[build] WARNING: No DTS overlay found for $BOARD_TARGET"
+        echo "[build]   Expected: $(basename $EXPECTED_DTS)"
+        echo "[build]   Also tried: $(basename ${BOARD_NAME}_${VARIANT}.overlay)"
+    fi
+else
+    echo "[build] Found DTS overlay: $(basename $EXPECTED_DTS)"
 fi
 
 # Fix OpenThread header include for Zephyr 4.1.0
