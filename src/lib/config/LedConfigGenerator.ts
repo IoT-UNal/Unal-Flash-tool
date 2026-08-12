@@ -2,14 +2,14 @@
  * LED Config Generator
  *
  * Generates a 64-byte binary blob matching the firmware's led_config struct.
- * This blob is flashed at offset 0x3E0080 (= WIFI_CONFIG_FLASH_OFFSET + 128)
- * alongside the main firmware and WiFi config.
+ * This blob is flashed at offset 0x3E0080 in the scratch partition
+ * (scratch_partition @ 0x3E0000 + 128-byte reserved block).
  *
  * Binary layout (64 bytes):
  *   Offset  Size  Field
  *   0x00    4     magic        (0x4C454443 = "LEDC", little-endian)
  *   0x04    1     version      (1)
- *   0x05    1     mode         (0=solid,1=blink,2=breathe,3=rainbow,4=wifi_status)
+ *   0x05    1     mode         (0=solid,1=blink,2=breathe,3=rainbow)
  *   0x06    1     brightness   (0–255)
  *   0x07    1     speed        (1–255)
  *   0x08    1     color_r
@@ -19,10 +19,8 @@
  *   0x0C    52    reserved     (0xFF)
  */
 
-import { WIFI_CONFIG_FLASH_OFFSET } from "./WifiConfigGenerator";
-
-/** Flash offset: immediately after the 128-byte WiFi config */
-export const LED_CONFIG_FLASH_OFFSET = WIFI_CONFIG_FLASH_OFFSET + 128;
+/** Flash offset: scratch_partition (0x3E0000) + 128-byte reserved block */
+export const LED_CONFIG_FLASH_OFFSET = 0x3e0080;
 
 const LED_CONFIG_MAGIC = 0x4c454443; // "LEDC" in ASCII
 const LED_CONFIG_VERSION = 1;
@@ -33,7 +31,6 @@ export enum LedMode {
   Blink = 1,
   Breathe = 2,
   Rainbow = 3,
-  WifiStatus = 4,
 }
 
 export const LED_MODE_LABELS: Record<LedMode, string> = {
@@ -41,7 +38,6 @@ export const LED_MODE_LABELS: Record<LedMode, string> = {
   [LedMode.Blink]: "Blink",
   [LedMode.Breathe]: "Breathe",
   [LedMode.Rainbow]: "Rainbow",
-  [LedMode.WifiStatus]: "WiFi Status",
 };
 
 export interface LedConfig {
@@ -54,8 +50,8 @@ export interface LedConfig {
 }
 
 export const DEFAULT_LED_CONFIG: LedConfig = {
-  mode: LedMode.WifiStatus,
-  brightness: 40,
+  mode: LedMode.Solid,
+  brightness: 128,
   speed: 128,
   colorR: 0,
   colorG: 120,

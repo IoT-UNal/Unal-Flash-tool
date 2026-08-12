@@ -1,0 +1,3 @@
+[submodule "firmware/ami-lwm2m-node"]
+	path = firmware/ami-lwm2m-node
+	url = https://github.com/jsebgiraldo/ami-lwm2m-node.git

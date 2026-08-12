@@ -375,14 +375,16 @@ export class FlashManager {
     return classifyFlashError(err);
   }
 
-  /** Reset the device via DTR toggle */
+  /** Reset the device via RTS + DTR toggle.
+   *  Classic UART bridges: RTS → EN, DTR → GPIO0/GPIO9.
+   *  ESP32-C6 USB Serial/JTAG: RTS → internal reset, DTR → GPIO9. */
   async hardReset(): Promise<void> {
     if (!this.transport) return;
-    await this.transport.setDTR(false);
+    await this.transport.setDTR(false);   // GPIO9 high → normal boot
+    await this.transport.setRTS(true);    // Assert EN reset
     await new Promise((r) => setTimeout(r, 100));
-    await this.transport.setDTR(true);
+    await this.transport.setRTS(false);   // Release EN → chip starts
     await new Promise((r) => setTimeout(r, 50));
-    await this.transport.setDTR(false);
   }
 
   /** Disconnect from the device and release the serial port */

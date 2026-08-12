@@ -1,6 +1,35 @@
 node_modules
 .next
 .git
-*.md
 .env
 .env.local
+
+# Docs (not needed at runtime)
+docs/
+*.md
+
+# Firmware build artifacts (huge) — keep only the final .bin
+firmware/*/build/CMakeFiles/
+firmware/*/build/modules/
+firmware/*/build/Kconfig/
+firmware/*/build/zephyr/runners/
+firmware/*/build/zephyr/include/
+firmware/*/build/zephyr/CMakeFiles/
+firmware/*/build/zephyr/*.elf
+firmware/*/build/zephyr/*.map
+firmware/*/build/app/
+firmware/*/build/*.ninja
+firmware/*/build/compile_commands.json
+firmware/hello-world/
+
+# ami-lwm2m-node: exclude non-essential files (keep src/, CMakeLists.txt, prj.conf, Kconfig, etc.)
+firmware/ami-lwm2m-node/.git/
+firmware/ami-lwm2m-node/.context/
+firmware/ami-lwm2m-node/.github/
+firmware/ami-lwm2m-node/docs/
+
+# Temp build overlays
+tmp/
+
+# Monitoring configs (only used by compose sidecar services)
+monitoring/
