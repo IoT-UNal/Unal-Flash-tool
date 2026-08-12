@@ -14,6 +14,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -22,12 +24,12 @@ jobs:
 
       - name: Install west and dependencies
         run: |
-          pip install west patool
+          pip install west patool "esptool>=5.0.2"
 
-      - name: Initialize Zephyr workspace
+      - name: Initialize Zephyr workspace (v4.3.0)
         run: |
           cd /tmp
-          west init zephyrproject --mr v4.1.0
+          west init zephyrproject --mr v4.3.0
           cd zephyrproject
           west update --narrow -o=--depth=1
 
@@ -39,11 +41,16 @@ jobs:
           cd /tmp/zephyrproject
           west sdk install -t riscv64-zephyr-elf
 
+      - name: Fetch Espressif binary blobs
+        run: |
+          cd /tmp/zephyrproject
+          west blobs fetch hal_espressif
+
       - name: Build Hello World firmware (XIAO ESP32-C6)
         run: |
           export ZEPHYR_BASE=/tmp/zephyrproject/zephyr
           cd /tmp/zephyrproject
-          west build -b xiao_esp32c6/esp32c6 \
+          west build -b xiao_esp32c6/esp32c6/hpcore \
             $GITHUB_WORKSPACE/firmware/zephyr-hello \
             -d $GITHUB_WORKSPACE/firmware/zephyr-hello/build
 
@@ -51,7 +58,7 @@ jobs:
         run: |
           export ZEPHYR_BASE=/tmp/zephyrproject/zephyr
           cd /tmp/zephyrproject
-          west build -b xiao_esp32c6/esp32c6 \
+          west build -b xiao_esp32c6/esp32c6/hpcore \
             $GITHUB_WORKSPACE/firmware/zephyr-wifi \
             -d $GITHUB_WORKSPACE/firmware/zephyr-wifi/build
 
@@ -59,9 +66,34 @@ jobs:
         run: |
           export ZEPHYR_BASE=/tmp/zephyrproject/zephyr
           cd /tmp/zephyrproject
-          west build -b xiao_esp32c6/esp32c6 \
+          west build -b xiao_esp32c6/esp32c6/hpcore \
             $GITHUB_WORKSPACE/firmware/zephyr-rgb \
             -d $GITHUB_WORKSPACE/firmware/zephyr-rgb/build
+
+      - name: Patch AMI LwM2M source for Zephyr 4.3.0 compatibility
+        run: |
+          AMI_DIR=$GITHUB_WORKSPACE/firmware/ami-lwm2m-node
+          # Remove Kconfig symbols incompatible with Zephyr 4.x / RISC-V
+          sed -i \
+            -e '/^CONFIG_FAULT_DUMP=/d' \
+            -e '/^CONFIG_SHELL_BACKEND_SERIAL_TX_RING_BUFFER_SIZE=/d' \
+            -e '/^CONFIG_LWM2M_MAX_NOTIFIED_NUMERICAL_RES_TRACKED=/d' \
+            "$AMI_DIR/prj.conf"
+          # Rename DTS overlay for Zephyr 4.3.0 qualified board name
+          if [ -f "$AMI_DIR/boards/xiao_esp32c6_hpcore.overlay" ]; then
+            mv "$AMI_DIR/boards/xiao_esp32c6_hpcore.overlay" "$AMI_DIR/boards/xiao_esp32c6_esp32c6_hpcore.overlay"
+          fi
+          # Fix OpenThread header includes
+          find "$AMI_DIR/src" -name '*.c' -o -name '*.h' | xargs sed -i \
+            's|#include <openthread\.h>|#include <zephyr/net/openthread.h>|g'
+
+      - name: Build AMI LwM2M firmware (ESP32-C6 Super Mini)
+        run: |
+          export ZEPHYR_BASE=/tmp/zephyrproject/zephyr
+          cd /tmp/zephyrproject
+          west build -b xiao_esp32c6/esp32c6/hpcore \
+            $GITHUB_WORKSPACE/firmware/ami-lwm2m-node \
+            -d $GITHUB_WORKSPACE/firmware/ami-lwm2m-node/build
 
       - name: Prepare release assets
         run: |
@@ -69,9 +101,11 @@ jobs:
           HELLO_DIR=$GITHUB_WORKSPACE/firmware/zephyr-hello/build/zephyr
           WIFI_DIR=$GITHUB_WORKSPACE/firmware/zephyr-wifi/build/zephyr
           RGB_DIR=$GITHUB_WORKSPACE/firmware/zephyr-rgb/build/zephyr
+          AMI_DIR=$GITHUB_WORKSPACE/firmware/ami-lwm2m-node/build/zephyr
           cp $HELLO_DIR/zephyr.bin release-assets/esp32c6-xiao-zephyr-merged.bin
           cp $WIFI_DIR/zephyr.bin release-assets/esp32c6-xiao-wifi-merged.bin
           cp $RGB_DIR/zephyr.bin release-assets/esp32c6-supermini-rgb-wifi-merged.bin
+          cp $AMI_DIR/zephyr.bin release-assets/esp32c6-supermini-ami-lwm2m-merged.bin
 
       - name: Generate default device config binary
         run: node $GITHUB_WORKSPACE/scripts/generate-device-config.mjs release-assets/device-config-default.bin
@@ -90,6 +124,7 @@ jobs:
                   { "name": "hello-world", "file": "esp32c6-xiao-zephyr-merged.bin", "offset": "0x0" },
                   { "name": "wifi", "file": "esp32c6-xiao-wifi-merged.bin", "offset": "0x0" },
                   { "name": "rgb-wifi", "file": "esp32c6-supermini-rgb-wifi-merged.bin", "offset": "0x0" },
+                  { "name": "ami-lwm2m", "file": "esp32c6-supermini-ami-lwm2m-merged.bin", "offset": "0x0" },
                   { "name": "device-config", "file": "device-config-default.bin", "offset": "0x3E0000" }
                 ]
               }
@@ -124,6 +159,13 @@ jobs:
             - `device-config-default.bin` — **Config por defecto (vacía)** — offset `0x3E0000`
             - WiFi STA + LED RGB WS2812B configurable (solid, blink, breathe, rainbow, wifi_status)
             - Config partition de 192 bytes: WiFi (0-127) + LED (128-191)
+
+            #### AMI LwM2M (Thread/OpenThread)
+            - `esp32c6-supermini-ami-lwm2m-merged.bin` — **Binario único (bootloader + app)** — offset `0x0`
+            - Nodo AMI smart meter con LwM2M sobre Thread (IEEE 802.15.4)
+            - Lectura de medidor trifásico vía RS-485 Modbus (Object 10242)
+            - Conectividad OpenThread con ThingsBoard Edge como servidor LwM2M
+            - Configuración build-time via prj.conf overlay (usar wizard AMI en la web)
 
             **Config partition layout (0x3E0000):**
             | Offset | Tamaño | Contenido |

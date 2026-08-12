@@ -13,7 +13,6 @@
 
 #include "led_ctrl.h"
 #include "rgb_led.h"
-#include "wifi_mgr.h"
 
 LOG_MODULE_REGISTER(led_ctrl, LOG_LEVEL_INF);
 
@@ -118,47 +117,6 @@ static void do_rainbow(const struct led_config *c, uint32_t tick)
 	rgb_led_set(r, g, b);
 }
 
-/* WiFi status: colour shows connection state */
-static void do_wifi_status(const struct led_config *c, uint32_t tick)
-{
-	enum wifi_mgr_state state = wifi_mgr_get_state();
-	uint8_t r, g, b;
-
-	switch (state) {
-	case WIFI_MGR_CONNECTED:
-		/* Solid green */
-		r = 0; g = 255; b = 0;
-		rgb_led_set(scale(r, c->brightness),
-			    scale(g, c->brightness),
-			    scale(b, c->brightness));
-		return;
-
-	case WIFI_MGR_CONNECTING:
-		/* Breathing yellow */
-		r = 255; g = 180; b = 0;
-		break;
-
-	default:
-		/* Fast blink red — no credentials or disconnected */
-		r = 255; g = 0; b = 0;
-		if ((tick / 5) % 2 == 0) {
-			rgb_led_set(scale(r, c->brightness),
-				    scale(g, c->brightness),
-				    scale(b, c->brightness));
-		} else {
-			rgb_led_off();
-		}
-		return;
-	}
-
-	/* Breathing for "connecting" */
-	uint32_t phase = tick % 512;
-	uint8_t breath = (phase < 256) ? (uint8_t)phase
-					: (uint8_t)(511 - phase);
-	uint8_t br = scale(c->brightness, breath);
-	rgb_led_set(scale(r, br), scale(g, br), scale(b, br));
-}
-
 /* ── thread entry ────────────────────────────────────────────────── */
 
 static void led_thread_fn(void *p1, void *p2, void *p3)
@@ -189,9 +147,8 @@ static void led_thread_fn(void *p1, void *p2, void *p3)
 		case LED_MODE_RAINBOW:
 			do_rainbow(&c, tick);
 			break;
-		case LED_MODE_WIFI_STATUS:
 		default:
-			do_wifi_status(&c, tick);
+			do_solid(&c);
 			break;
 		}
 
